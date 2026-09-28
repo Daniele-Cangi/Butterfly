@@ -1,0 +1,12 @@
+import { createClient } from "@sanity/client";
+import { loadEnvConfig } from "@next/env";
+import { sampleWorld } from "../fixtures/harbor";
+import { toDraftDocument } from "../src/sanity/adapter";
+import { pointerId } from "../src/sanity/read";
+loadEnvConfig(process.cwd());
+const projectId=process.env.NEXT_PUBLIC_SANITY_PROJECT_ID,dataset=process.env.NEXT_PUBLIC_SANITY_DATASET,token=process.env.SANITY_API_TOKEN;
+if(!projectId||dataset!=="butterfly"||!token)throw new Error("Set a dedicated project ID, butterfly dataset and server-side SANITY_API_TOKEN");
+const client=createClient({projectId,dataset,token,useCdn:false,apiVersion:"2025-02-19"});
+await client.createIfNotExists(toDraftDocument(sampleWorld));
+await client.createIfNotExists({_id:pointerId,_type:"butterflyWorldPointer",worldId:sampleWorld.id,activeRevisionId:""});
+console.log("Butterfly draft and pointer exist. Existing editorial content was preserved.");
