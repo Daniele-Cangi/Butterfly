@@ -156,6 +156,15 @@ export default function Experience({ initialWorld, source, error }: { initialWor
   const originalDeparture = initialWorld.events.find(event => event.id === roles.deliveryEventId)?.at;
   const ferryControl = initialWorld.visitorFerryOpening;
   const ferryOpening = ferryControl ? variantWorld.connections.find(connection => connection.id === ferryControl.connectionId)?.windows[0].start : undefined;
+  const recoveryAdjustments = [
+    keepDeparture && originalDeparture !== undefined ? "allow an earlier departure" : null,
+    ferryControl && ferryOpening !== undefined && ferryControl.values.some(value => value !== ferryOpening) ? "change the ferry opening" : null,
+  ].filter((adjustment): adjustment is string => adjustment !== null);
+  const recoveryAdvice = recoveryAdjustments.length === 1
+    ? ` You can ${recoveryAdjustments[0]}.`
+    : recoveryAdjustments.length === 2
+      ? ` You can ${recoveryAdjustments[0]} or ${recoveryAdjustments[1]}.`
+      : "";
   const searchOptions: SearchOptions = keepDeparture && originalDeparture !== undefined
     ? { constraints: { departureNotBefore: { eventId: roles.deliveryEventId, minute: originalDeparture } } }
     : {};
@@ -548,7 +557,7 @@ export default function Experience({ initialWorld, source, error }: { initialWor
               <div><span className="eyebrow">VERIFIED IN THE ENGINE</span><h2>{search.status === "found" ? "Ways to keep the moment" : search.status === "limit-reached" && search.alternatives.length ? "Verified options from a partial search" : search.status === "already-satisfied" ? "Already possible" : search.status === "indeterminate" ? "Result indeterminate" : "No alternative in this domain"}</h2></div>
               <button className="quiet" onClick={() => { setSearch(null); setPreviewId(null); setSceneVersion("variant"); }}>Close</button>
             </div>
-            <p className="search-outcome">{search.status === "found" ? `${search.meaningfulCount} distinct verified ${search.meaningfulCount === 1 ? "way preserves" : "ways preserve"} the chosen composition at ${displayTime(goal.time)}. ${search.meaningfulCount > search.alternatives.length ? `Showing the first ${search.alternatives.length} intervention cards. ` : ""}Choose one to preview; your variant has not changed.` : search.status === "exhausted" ? `With these limits, none of the ${search.domainSize} allowed candidate changes preserves the composition at ${displayTime(goal.time)}. You can allow an earlier departure or change the ferry opening. This conclusion covers only the configured domain.` : search.status === "already-satisfied" ? "Your current variant already preserves the chosen composition." : search.status === "limit-reached" ? "The candidate limit was reached. The remaining domain has not been checked." : "Incomplete world data leaves the result unsettled."}</p>
+            <p className="search-outcome">{search.status === "found" ? `${search.meaningfulCount} distinct verified ${search.meaningfulCount === 1 ? "way preserves" : "ways preserve"} the chosen composition at ${displayTime(goal.time)}. ${search.meaningfulCount > search.alternatives.length ? `Showing the first ${search.alternatives.length} intervention cards. ` : ""}Choose one to preview; your variant has not changed.` : search.status === "exhausted" ? `With these limits, none of the ${search.domainSize} allowed candidate changes preserves the composition at ${displayTime(goal.time)}. This conclusion covers only the configured domain.${recoveryAdvice}` : search.status === "already-satisfied" ? "Your current variant already preserves the chosen composition." : search.status === "limit-reached" ? "The candidate limit was reached. The remaining domain has not been checked." : "Incomplete world data leaves the result unsettled."}</p>
             <details className="search-method"><summary>How the search was checked</summary><p>Checked {search.examined} of {search.domainSize} candidates, with at most {search.maxInterventions} interventions and a limit of {search.maxCandidates} candidates. Fewer changes rank first, then smaller time shifts. {search.meaningfulCount} nonredundant verified intervention choices were found among the checked candidates; {search.alternatives.length} are shown as cards. {search.groupedCount} redundant combinations were omitted from the main cards because their extra operations did not change event outcomes, route IDs or article compatibility. Separate interventions remain separate cards. {search.status === "limit-reached" && "A reached limit does not prove impossibility."}</p></details>
             <div className="cards">
               {search.alternatives.map((alternative, index) => {
