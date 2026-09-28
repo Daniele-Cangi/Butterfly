@@ -34,5 +34,18 @@ test("bridge closure, consequence, recovery, timeline and reset", async ({ page 
   await expect(page.getByText("The photograph can happen.")).toBeVisible();
   expect(errors).toEqual([]);
 });
-test("mobile and reduced motion keep the journey usable", async ({page})=>{await page.setViewportSize({width:390,height:844});await page.emulateMedia({reducedMotion:"reduce"});await page.goto("/");await expect(page.getByRole("button",{name:"Play"})).toBeDisabled();await page.getByRole("button",{name:"Close bridge at 16:15"}).click();await page.getByRole("button",{name:/Keep this moment/}).click();await expect(page.getByText("Ways to keep the moment")).toBeVisible();await mkdir("screenshots",{recursive:true});await page.screenshot({path:"screenshots/04-recovery-mobile.png",fullPage:true});expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);});
+test("mobile and reduced motion keep the journey usable", async ({page})=>{
+  await page.setViewportSize({width:390,height:844});
+  await page.emulateMedia({reducedMotion:"reduce"});
+  await page.goto("/");
+  await expect(page.locator("canvas")).toBeVisible();
+  await expect(page.getByRole("button",{name:"Play"})).toBeDisabled();
+  await page.getByRole("button",{name:"Close bridge at 16:15"}).click();
+  await page.getByRole("button",{name:/Keep this moment/}).click();
+  await expect(page.getByText("Ways to keep the moment")).toBeVisible();
+  await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
+  await mkdir("screenshots",{recursive:true});
+  await page.screenshot({path:"screenshots/04-recovery-mobile.png",fullPage:true});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
 test("studio explains missing Sanity configuration",async({page})=>{test.setTimeout(120000);await page.goto("/studio",{waitUntil:"domcontentloaded"});await expect(page.getByText("Configure a dedicated Sanity project to open Butterfly Studio.")).toBeVisible();});

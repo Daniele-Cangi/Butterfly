@@ -55,15 +55,48 @@ export function simulate(input: World): Simulation {
         reasons.push({ requirement: r, observed: prior.time === null ? prior.status : `${prior.status} at ${formatTime(prior.time,world.originMinute)}`, status, involved: [r.eventId], causes: [r.eventId] });
       } else if (r.type === "entityAt") {
         const entity = world.entities.find(x => x.id === r.entityId)!;
-        const movement = [...results.values()].find(x => x.status === "possible" && x.route && world.events.find(e => e.id === x.id)?.actorIds.includes(r.entityId));
-        const place = movement && movement.route && at >= movement.route.depart ? (at >= movement.route.arrive ? world.events.find(e => e.id === movement.id)!.to! : "in transit") : entity.initialPlaceId;
+        // Resolve every transport that could have started by this instant before
+        // reading location. Event IDs are identities, not temporal ordering.
+        for (const candidate of ordered(world.events).filter(candidate =>
+          candidate.id !== event.id &&
+          !visiting.has(candidate.id) &&
+          candidate.kind === "transport" &&
+          candidate.at! <= at &&
+          candidate.actorIds.includes(r.entityId)
+        )) resolve(candidate);
+        const movement = [...results.values()]
+          .filter(result => {
+            const candidate = world.events.find(x => x.id === result.id);
+            return result.status === "possible" && result.route !== undefined &&
+              result.route.depart <= at && candidate?.actorIds.includes(r.entityId);
+          })
+          .sort((a, b) => a.route!.depart - b.route!.depart || a.route!.arrive - b.route!.arrive || a.id.localeCompare(b.id))
+          .at(-1);
+        const place = movement?.route
+          ? (at >= movement.route.arrive ? world.events.find(e => e.id === movement.id)!.to! : "in transit")
+          : entity.initialPlaceId;
         const status = place === r.placeId ? "possible" : place ? "impossible" : "unknown";
         reasons.push({ requirement: r, observed: place ?? "unknown", status, involved: [r.entityId, r.placeId], causes: movement ? [movement.id] : [] });
       } else {
-        const derived = [...results.values()].filter(x => x.status === "possible" && x.time !== null && x.time <= at).flatMap(x => world.events.find(e => e.id === x.id)!.effects.map(effect => ({ ...effect, eventId: x.id })) ).find(x => x.key === r.key);
+        // A fact may be produced by an event whose ID sorts after this event.
+        // Resolve its producers, then use only effects completed by this time.
+        for (const producer of ordered(world.events).filter(candidate =>
+          candidate.id !== event.id && !visiting.has(candidate.id) &&
+          candidate.effects.some(effect => effect.key === r.key)
+        )) resolve(producer);
+        const derived = [...results.values()]
+          .filter(result => result.status === "possible" && result.time !== null && result.time <= at)
+          .flatMap(result => world.events.find(e => e.id === result.id)!.effects.map(effect => ({ ...effect, eventId: result.id, time: result.time! })))
+          .filter(effect => effect.key === r.key)
+          .sort((a, b) => a.time - b.time || a.eventId.localeCompare(b.eventId))
+          .at(-1);
         const declared = world.facts.find(x => x.key === r.key && x.interval.start <= at && at < x.interval.end);
         const actual = derived?.value ?? declared?.value;
-        const future = actual === undefined ? [...results.values()].filter(x => x.status === "possible" && x.time !== null && x.time > at).map(x => ({result:x,effect:world.events.find(e => e.id === x.id)!.effects.find(effect=>effect.key===r.key)})).find(x=>x.effect) : undefined;
+        const future = actual === undefined ? [...results.values()]
+          .filter(result => result.status === "possible" && result.time !== null && result.time > at)
+          .map(result => ({ result, effect: world.events.find(e => e.id === result.id)!.effects.find(effect => effect.key === r.key) }))
+          .filter((candidate): candidate is { result: EventResult & { time: number }; effect: Event["effects"][number] } => candidate.effect !== undefined)
+          .sort((a, b) => a.result.time - b.result.time || a.result.id.localeCompare(b.result.id))[0] : undefined;
         const status = actual === undefined ? future ? "impossible" : "unknown" : actual === r.value ? "possible" : "impossible";
         reasons.push({ requirement: r, observed: actual === undefined ? future ? `available at ${formatTime(future.result.time,world.originMinute)}` : "missing" : String(actual), status, involved: [r.key], causes: derived ? [derived.eventId] : declared ? [declared.id] : future ? [future.result.id] : [] });
       }

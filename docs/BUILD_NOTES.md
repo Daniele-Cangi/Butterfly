@@ -15,6 +15,12 @@ Official Next.js, React Three Fiber, Sanity App SDK/authentication, Content Lake
 - `npm run build`: production build passed after the content and camera refinements; repeated after the dependency update before handoff.
 - Screenshots were opened and reviewed: `screenshots/01-bridge-closed-desktop.png`, `02-recovery-preview-desktop.png`, `03-recovered-desktop.png`, `04-recovery-mobile.png`. The last mobile view shows both banks and the bridge; the first camera attempt did not and was discarded.
 
+## Review regression suite
+
+The external review suite exposed three cases where the simulator had used event ID order as a proxy for time: location checks could run before an earlier trip, derived facts could be missed, and location after a later trip used the first movement. The engine now resolves relevant earlier transports and fact producers before evaluating a requirement, selects the latest completed movement, and orders derived values by their completion time. The attached cases are retained in `tests/review-regressions.test.ts`.
+
+Verification after the fix: `npm test` passed all 16 behavior tests, `npm run test:browser` passed all 3 Chromium flows, `npm run typecheck`, `npm run lint` and `npm run build` passed. The first mobile screenshot captured the lazy-loading placeholder; the browser test now waits for the 3D canvas before capturing it.
+
 No Sanity credentials were present. Live Content Lake reads, Studio login, seed and publication are therefore configuration-blocked and have not been represented as tested. No App SDK app, Workflow or AI runtime was installed. The Director is an authenticated Studio custom tool.
 
 `npm audit fix` without forced major changes could not clear all transitive advisories. Updating compatible `styled-components` and Vitest releases reduced the audit from 18 to 14 findings (11 moderate, 3 high). The remaining high findings are in Sanity CLI transitive packages (`adm-zip`, `js-yaml`, `smol-toml`); npm proposed a breaking Sanity downgrade, which was not applied. Review these upstream dependencies before a public deployment, especially any privileged authoring environment. A clean `npm ci` from the lockfile succeeded after the updates.
