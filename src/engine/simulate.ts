@@ -32,6 +32,19 @@ export function findRoute(world: World, from: string, to: string, mode: string, 
   const found = best.get(to); return found ? { connectionIds: found.ids, depart: found.depart, arrive: found.time, path: found.path } : undefined;
 }
 
+function earliestPossibleCompletion(world: World, event: Event): number | undefined {
+  if (event.kind === "dependent") {
+    const parent = world.events.find(candidate => candidate.id === event.afterEventId);
+    if (!parent) return undefined;
+    const parentTime = earliestPossibleCompletion(world, parent);
+    return parentTime === undefined ? undefined : parentTime + event.delay!;
+  }
+  if (event.kind === "transport") {
+    return findRoute(world, event.from!, event.to!, event.mode!, event.at!)?.arrive;
+  }
+  return event.at;
+}
+
 export function simulate(input: World): Simulation {
   const world = validateWorld(input);
   const results = new Map<string, EventResult>();
@@ -78,12 +91,16 @@ export function simulate(input: World): Simulation {
         const status = place === r.placeId ? "possible" : place ? "impossible" : "unknown";
         reasons.push({ requirement: r, observed: place ?? "unknown", status, involved: [r.entityId, r.placeId], causes: movement ? [movement.id] : [] });
       } else {
-        // A fact may be produced by an event whose ID sorts after this event.
-        // Resolve its producers, then use only effects completed by this time.
+        // Only producers that could have completed by this instant can affect
+        // the read. A future event is not a dependency of the current event.
+        // If a relevant producer is already being resolved, keep cycle detection
+        // active: that is a real causal cycle, unlike a future scheduling entry.
         for (const producer of ordered(world.events).filter(candidate =>
-          candidate.id !== event.id && !visiting.has(candidate.id) &&
           candidate.effects.some(effect => effect.key === r.key)
-        )) resolve(producer);
+        )) {
+          const earliest = earliestPossibleCompletion(world, producer);
+          if (earliest !== undefined && earliest <= at) resolve(producer);
+        }
         const derived = [...results.values()]
           .filter(result => result.status === "possible" && result.time !== null && result.time <= at)
           .flatMap(result => world.events.find(e => e.id === result.id)!.effects.map(effect => ({ ...effect, eventId: result.id, time: result.time! })))
@@ -92,13 +109,8 @@ export function simulate(input: World): Simulation {
           .at(-1);
         const declared = world.facts.find(x => x.key === r.key && x.interval.start <= at && at < x.interval.end);
         const actual = derived?.value ?? declared?.value;
-        const future = actual === undefined ? [...results.values()]
-          .filter(result => result.status === "possible" && result.time !== null && result.time > at)
-          .map(result => ({ result, effect: world.events.find(e => e.id === result.id)!.effects.find(effect => effect.key === r.key) }))
-          .filter((candidate): candidate is { result: EventResult & { time: number }; effect: Event["effects"][number] } => candidate.effect !== undefined)
-          .sort((a, b) => a.result.time - b.result.time || a.result.id.localeCompare(b.result.id))[0] : undefined;
-        const status = actual === undefined ? future ? "impossible" : "unknown" : actual === r.value ? "possible" : "impossible";
-        reasons.push({ requirement: r, observed: actual === undefined ? future ? `available at ${formatTime(future.result.time,world.originMinute)}` : "missing" : String(actual), status, involved: [r.key], causes: derived ? [derived.eventId] : declared ? [declared.id] : future ? [future.result.id] : [] });
+        const status = actual === undefined ? "unknown" : actual === r.value ? "possible" : "impossible";
+        reasons.push({ requirement: r, observed: actual === undefined ? "missing at this time" : String(actual), status, involved: [r.key], causes: derived ? [derived.eventId] : declared ? [declared.id] : [] });
       }
     }
     let route: Route | undefined;

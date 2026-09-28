@@ -1,16 +1,4 @@
-/**
- * Proposed regression tests for Daniele-Cangi/Butterfly.
- * Reviewed commit: 642514b371ed980485bf8e55cf1f0bbd717fe55f.
- *
- * Place this file in tests/review-regressions.test.ts and run:
- *   npx vitest run tests/review-regressions.test.ts
- *
- * These tests have NOT been executed against the repository here:
- * the review environment could read the GitHub connector, but could not
- * download the repository/install its dependencies. They encode behavioral
- * expectations derived from the reviewed model and simulator.
- * No changes were made to the remote repository.
- */
+/** Behavioral regression cases derived from an external review of Butterfly. */
 import { describe, expect, it } from "vitest";
 import { sampleWorld } from "../fixtures/harbor";
 import { validateWorld, type World, type Event, type Requirement } from "../src/world/model";
@@ -101,5 +89,49 @@ describe("review: temporal state must not depend on lexical event IDs", () => {
     expect(getEvent(result, "return-trip").status).toBe("possible");
     expect(getEvent(result, "return-trip").time).toBe(90);
     expect(getEvent(result, "z-after-return-check").status).toBe("possible");
+  });
+
+  it("does not resolve a future restock as a dependency of an earlier fact read", () => {
+    function outcome(restockId: string) {
+      const world = copy();
+      world.events.push(checkEvent("stock-check", 80, [
+        { type: "factEquals", key: "stockAvailable", value: true },
+      ]));
+      world.events.push({
+        id: restockId,
+        worldId: world.id,
+        kind: "fixed",
+        name: "Future restock",
+        at: 90,
+        requirements: [{ type: "eventOccurred", eventId: "stock-check" }],
+        actorIds: [],
+        effects: [{ key: "stockAvailable", value: true }],
+      });
+
+      const result = simulate(validateWorld(world));
+      return {
+        check: getEvent(result, "stock-check"),
+        restockStatus: getEvent(result, restockId).status,
+      };
+    }
+
+    const earlyRestockId = outcome("a-restock");
+    const lateRestockId = outcome("z-restock");
+
+    expect(earlyRestockId.check).toEqual(lateRestockId.check);
+    expect(earlyRestockId.check.status).toBe("unknown");
+    expect(earlyRestockId.restockStatus).toBe("unknown");
+    expect(lateRestockId.restockStatus).toBe("unknown");
+  });
+
+  it("still rejects a fact requirement produced by the same event", () => {
+    const world = copy();
+    const selfRestock = checkEvent("self-restock", 80, [
+      { type: "factEquals", key: "stockAvailable", value: true },
+    ]);
+    selfRestock.effects.push({ key: "stockAvailable", value: true });
+    world.events.push(selfRestock);
+
+    expect(() => simulate(validateWorld(world))).toThrow(/Cyclic dependency: self-restock/);
   });
 });
