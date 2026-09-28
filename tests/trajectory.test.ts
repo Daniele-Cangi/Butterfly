@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sampleWorld } from "../fixtures/harbor";
 import { keepThisMoment, type Goal } from "../src/engine/search";
-import { findRoute, getEvent, sampleEntity, sampleRoute, simulate } from "../src/engine/simulate";
+import { findRoute, formatTime, getEvent, sampleEntity, sampleRoute, simulate } from "../src/engine/simulate";
 import { applyPatch, validateWorld, type RealityPatch, type World } from "../src/world/model";
 
 const closeBridge = (): RealityPatch => ({
@@ -16,6 +16,11 @@ const featuredGoal = (world: World): Goal => {
 };
 
 describe("timed route sampling", () => {
+  it("formats fractional playhead minutes to HH:mm using nearest-minute display rounding", () => {
+    expect(formatTime(20.05, 960)).toBe("16:20");
+    expect(formatTime(20.5, 960)).toBe("16:21");
+  });
+
   it("samples explicit road, bridge and road leg times by distance, independent of seek order", () => {
     const result = simulate(sampleWorld);
     const route = getEvent(result, sampleWorld.presentation.roles.deliveryEventId).route!;
@@ -54,6 +59,54 @@ describe("timed route sampling", () => {
     expect(getEvent(result, world.featuredMoment.eventId).status).toBe("possible");
   });
 
+  it("uses the same depot and intermediate-stop locations for requirements and sampling", () => {
+    const world = structuredClone(sampleWorld);
+    world.connections.find(connection => connection.id === "bridge")!.enabled = false;
+    world.connections.find(connection => connection.id === "land")!.enabled = false;
+    world.connections.find(connection => connection.id === "ferry")!.enabled = true;
+    world.events.push({
+      id: "pier-presence-check",
+      worldId: world.id,
+      kind: "fixed",
+      name: "Pier presence check",
+      at: 29,
+      requirements: [{ type: "entityAt", entityId: world.presentation.roles.courierEntityId, placeId: world.presentation.roles.pierPlaceId }],
+      actorIds: [],
+      effects: [],
+    });
+    const checked = validateWorld(world);
+    const result = simulate(checked);
+    const route = getEvent(result, checked.presentation.roles.deliveryEventId).route!;
+
+    expect(sampleRoute(route, 19)).toMatchObject({ status: "waiting", placeId: "depot", position: [-5, -1] });
+    expect(sampleEntity(checked, result, checked.presentation.roles.courierEntityId, 19)).toMatchObject({ status: "at-place", placeId: "depot", position: [-5, -1] });
+    expect(getEvent(result, "pier-presence-check").status).toBe("possible");
+    expect(getEvent(result, "pier-presence-check").reasons[0].observed).toBe("pier");
+    expect(sampleEntity(checked, result, checked.presentation.roles.courierEntityId, 29)).toMatchObject({ status: "waiting", placeId: "pier", position: [-2.7, 2.5] });
+    expect(sampleEntity(checked, result, checked.presentation.roles.courierEntityId, 33)).toMatchObject({ status: "moving", role: "ferry" });
+    expect(sampleEntity(checked, result, checked.presentation.roles.courierEntityId, 33).placeId).toBeUndefined();
+  });
+
+  it("keeps a known intermediate wait place during an initial connection wait", () => {
+    const world = structuredClone(sampleWorld);
+    world.connections.find(connection => connection.id === "bridge")!.windows = [{ start: 30, end: 60 }];
+    world.connections.find(connection => connection.id === "land")!.enabled = false;
+    world.events.push({
+      id: "depot-wait-check",
+      worldId: world.id,
+      kind: "fixed",
+      name: "Depot wait check",
+      at: 25,
+      requirements: [{ type: "entityAt", entityId: "courier", placeId: "depot" }],
+      actorIds: [],
+      effects: [],
+    });
+    const checked = validateWorld(world);
+    const result = simulate(checked);
+    expect(getEvent(result, "depot-wait-check").status).toBe("possible");
+    expect(sampleEntity(checked, result, "courier", 25)).toMatchObject({ status: "waiting", placeId: "depot", position: [-5, -1] });
+  });
+
   it("keeps boundary arrival exact and samples the ferry only during its ferry segment", () => {
     const boundary = simulate(applyPatch(sampleWorld, { ...closeBridge(), operations: [{ type: "setConnectionEnd", connectionId: "bridge", value: 30 }] }));
     expect(sampleEntity(sampleWorld, boundary, sampleWorld.presentation.roles.courierEntityId, 29.99).status).toBe("moving");
@@ -77,6 +130,67 @@ describe("timed route sampling", () => {
     const result = simulate(world);
     expect(sampleEntity(world, result, world.presentation.roles.courierEntityId, 50).status).toBe("unknown");
     expect(result.artifacts.find(artifact => artifact.id === world.presentation.roles.storyArtifactId)?.compatibility).toBe("unknown");
+  });
+
+  it("lets a later verified transport establish location after an earlier unresolved trip", () => {
+    const world = structuredClone(sampleWorld);
+    world.facts.find(fact => fact.id === "cargo-ready")!.interval.start = 21;
+    world.events.push({
+      id: "later-courier-trip",
+      worldId: world.id,
+      kind: "transport",
+      name: "Later verified courier trip",
+      at: 40,
+      requirements: [],
+      actorIds: [world.presentation.roles.courierEntityId],
+      from: "depot",
+      to: "plaza",
+      mode: "van",
+      effects: [],
+    });
+    world.events.push({
+      id: "courier-arrival-check",
+      worldId: world.id,
+      kind: "fixed",
+      name: "Courier arrival check",
+      at: 50,
+      requirements: [{ type: "entityAt", entityId: world.presentation.roles.courierEntityId, placeId: "plaza" }],
+      actorIds: [],
+      effects: [],
+    });
+    const checked = validateWorld(world);
+    const result = simulate(checked);
+    const courier = checked.presentation.roles.courierEntityId;
+
+    expect(sampleEntity(checked, result, courier, 30).status).toBe("unknown");
+    expect(sampleEntity(checked, result, courier, 50)).toMatchObject({ status: "at-place", placeId: "plaza" });
+    expect(getEvent(result, "courier-arrival-check").status).toBe("possible");
+  });
+
+  it("keeps semantic places known when optional visual coordinates are absent", () => {
+    const world = structuredClone(sampleWorld);
+    for (const entity of world.entities) delete entity.visual.position;
+    const checked = validateWorld(world);
+    const result = simulate(checked);
+
+    expect(sampleEntity(checked, result, checked.presentation.roles.courierEntityId, 0)).toMatchObject({ status: "at-place", placeId: "depot" });
+    expect(sampleEntity(checked, result, checked.presentation.roles.courierEntityId, 30)).toMatchObject({ status: "at-place", placeId: "plaza" });
+    expect(getEvent(result, checked.featuredMoment.eventId).status).toBe("possible");
+    expect(result.artifacts.find(artifact => artifact.id === checked.presentation.roles.storyArtifactId)?.compatibility).toBe("supported");
+  });
+
+  it("keeps the sampled route endpoint after arrival when the destination has no visual position", () => {
+    const world = structuredClone(sampleWorld);
+    const destination = world.entities.find(entity => entity.id === world.presentation.roles.plazaPlaceId)!;
+    delete destination.visual.position;
+    const checked = validateWorld(world);
+    const result = simulate(checked);
+    const delivery = getEvent(result, checked.presentation.roles.deliveryEventId);
+    const arrival = sampleRoute(delivery.route!, delivery.route!.arrive);
+
+    expect(arrival).toMatchObject({ status: "at-place", placeId: destination.id });
+    expect(sampleEntity(checked, result, checked.presentation.roles.courierEntityId, delivery.route!.arrive))
+      .toMatchObject({ status: "at-place", placeId: destination.id, position: arrival.position });
   });
 
   it("does not produce NaN for a positive-duration route with coincident geometry", () => {

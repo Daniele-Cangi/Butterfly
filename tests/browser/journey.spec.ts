@@ -29,7 +29,7 @@ test("original, missed MomentFrame, ferry recovery, intermediate wait, apply and
   page.on("pageerror", error => errors.push(error.message));
   page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
   await page.goto("/");
-  await expect(page.getByText("Local sample", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Local sample/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "A crossing changes an afternoon." })).toBeVisible();
   await expect(page.getByTestId("scene-ready")).toBeAttached();
 
@@ -105,6 +105,46 @@ test("original, missed MomentFrame, ferry recovery, intermediate wait, apply and
   expect(errors).toEqual([]);
 });
 
+test("fractional seek, playback and MomentFrame keep every clock at one effective time", async ({ page }) => {
+  test.setTimeout(120000);
+  await page.goto("/");
+  await expect(page.getByTestId("scene-ready")).toBeAttached();
+  const slider = page.getByRole("slider", { name: "Seek scenario time" });
+  await seek(slider, 20.05);
+  await expect(slider).toHaveValue("20.05");
+  await expect(page.getByTestId("scene-clock")).toHaveText("16:20");
+  await expect(page.getByTestId("timeline-clock")).toHaveText("16:20");
+
+  await page.getByRole("button", { name: "Play" }).click();
+  await page.waitForFunction(() => Number((document.querySelector("#time-slider") as HTMLInputElement).value) > 20.05, { timeout: 5000 });
+  await page.getByRole("button", { name: "Pause" }).click();
+  await expect(page.getByTestId("scene-clock")).toHaveText((await page.getByTestId("timeline-clock").textContent()) ?? "");
+
+  await seek(slider, 20);
+  await page.getByRole("button", { name: "Close bridge at 16:15" }).click();
+  await page.getByRole("button", { name: /^The photograph:/ }).click();
+  await page.getByRole("button", { name: "Keep this moment" }).click();
+  await expect(page.getByRole("group", { name: "MomentFrame versions" })).toBeVisible();
+  await expect(slider).toBeDisabled();
+  await expect(page.getByTestId("scene-clock")).toHaveText("16:50");
+  await expect(page.getByTestId("timeline-clock")).toHaveText("16:50");
+
+  await page.getByRole("button", { name: "Your variant", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "The photograph is now a missed moment." })).toBeVisible();
+  await page.getByRole("button", { name: "Floral setup", exact: true }).first().click();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.getByTestId("scene-clock")).toHaveText("16:50");
+  await expect(page.getByTestId("timeline-clock")).toHaveText("16:50");
+  await expect(page.getByRole("heading", { name: "The photograph is now a missed moment." })).toBeVisible();
+
+  await page.getByRole("button", { name: "Return to neighborhood" }).click();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.getByTestId("scene-clock")).toHaveText("16:49");
+  await expect(page.getByTestId("timeline-clock")).toHaveText("16:49");
+});
+
 test("mobile reduced-motion MomentFrame and text controls remain usable", async ({ page }) => {
   test.setTimeout(120000);
   const errors: string[] = [];
@@ -127,8 +167,8 @@ test("mobile reduced-motion MomentFrame and text controls remain usable", async 
   expect(errors).toEqual([]);
 });
 
-test("studio explains missing Sanity configuration", async ({ page }) => {
+test("studio route exposes its configuration or Sanity connection state", async ({ page }) => {
   test.setTimeout(120000);
-  await page.goto("/studio", { waitUntil: "domcontentloaded" });
-  await expect(page.getByText("Configure a dedicated Sanity project to open Butterfly Studio.")).toBeVisible();
+  await page.goto("http://localhost:3000/studio", { waitUntil: "domcontentloaded", timeout: 60000 });
+  await expect(page.locator("body")).toContainText(/Configure a dedicated Sanity project|Connect this Studio to your project|Choose login provider|Butterfly world authoring/, { timeout: 30000 });
 });

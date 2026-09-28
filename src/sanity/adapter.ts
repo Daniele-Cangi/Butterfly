@@ -109,17 +109,26 @@ export function fromDraftDocument(raw: unknown): World {
       segments: connection.segments ? list(connection.segments).map(segment => ({ ...segment, path: list(segment.path).map(fromSanityPoint) })) : undefined,
     })),
     facts: list(draft.facts).map(fact => ({ id: fact.id, worldId: fact.worldId, key: fact.key, value: parsed(fact.valueJson), interval: fact.interval, source: "input" })),
-    events: list(draft.events).map(event => ({
-      ...event,
-      requirements: list(event.requirements).map(requirement => {
+    events: list(draft.events).map(event => {
+      const base = {
+        id: event.id,
+        worldId: event.worldId,
+        name: event.name,
+        requirements: list(event.requirements).map(requirement => {
         const operator = requirement.operator;
         if (operator === "factEquals") return { type: operator, key: requirement.key, value: parsed(requirement.valueJson) };
         if (operator === "entityAt") return { type: operator, entityId: requirement.entityId, placeId: requirement.placeId };
         if (operator === "eventOccurred") return { type: operator, eventId: requirement.eventId };
         throw new Error("Unknown requirement operator " + String(operator));
-      }),
-      effects: list(event.effects).map(effect => ({ key: effect.key, value: parsed(effect.valueJson) })),
-    })),
+        }),
+        actorIds: event.actorIds,
+        effects: list(event.effects).map(effect => ({ key: effect.key, value: parsed(effect.valueJson) })),
+      };
+      if (event.kind === "transport") return { ...base, kind: event.kind, at: event.at, from: event.from, to: event.to, mode: event.mode };
+      if (event.kind === "dependent") return { ...base, kind: event.kind, afterEventId: event.afterEventId, delay: event.delay };
+      if (event.kind === "fixed") return { ...base, kind: event.kind, at: event.at };
+      throw new Error("Unknown event kind " + String(event.kind));
+    }),
     artifacts: list(draft.artifacts),
     interventions: list(draft.interventions).map(intervention => intervention.kind === "setEventTime"
       ? { type: intervention.kind, eventId: intervention.eventId, values: intervention.timeValues, precondition: { minAvailableAt: intervention.minAvailableAt } }

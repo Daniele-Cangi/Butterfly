@@ -4,6 +4,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { sampleEntity, type PositionSample, type Simulation } from "../engine/simulate";
+import { getMomentMarkerPosition, isArrangementVisibleAt, selectMomentEntityPresence } from "./momentPresence";
 import type { World } from "../world/model";
 
 type Point = [number, number];
@@ -101,24 +102,25 @@ function Tree({ x, z, scale = 1 }: { x: number; z: number; scale?: number }) {
   );
 }
 
-function PersonModel({ color, selected = false }: { color: string; selected?: boolean }) {
+function PersonModel({ color, selected = false, uncertain = false }: { color: string; selected?: boolean; uncertain?: boolean }) {
+  const opacity = uncertain ? 0.38 : 1;
   return (
     <group>
       <mesh position={[0, 0.39, 0]} castShadow>
         <cylinderGeometry args={[0.12, 0.17, 0.62, 8]} />
-        <meshStandardMaterial color={color} />
+        <meshStandardMaterial color={color} transparent={uncertain} opacity={opacity} />
       </mesh>
       <mesh position={[0, 0.79, 0]} castShadow>
         <sphereGeometry args={[0.15, 12, 8]} />
-        <meshStandardMaterial color="#d7aa86" />
+        <meshStandardMaterial color="#d7aa86" transparent={uncertain} opacity={opacity} />
       </mesh>
       <mesh position={[-0.1, 0.08, 0]} rotation={[0, 0, 0.12]} castShadow>
         <cylinderGeometry args={[0.055, 0.06, 0.26, 7]} />
-        <meshStandardMaterial color="#554f4a" />
+        <meshStandardMaterial color="#554f4a" transparent={uncertain} opacity={opacity} />
       </mesh>
       <mesh position={[0.1, 0.08, 0]} rotation={[0, 0, -0.12]} castShadow>
         <cylinderGeometry args={[0.055, 0.06, 0.26, 7]} />
-        <meshStandardMaterial color="#554f4a" />
+        <meshStandardMaterial color="#554f4a" transparent={uncertain} opacity={opacity} />
       </mesh>
       {selected && <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.025, 0]}>
         <ringGeometry args={[0.27, 0.34, 32]} />
@@ -237,14 +239,38 @@ function TravelingEntity({ world, result, entityId, timeRef, kind, selected, vis
   );
 }
 
-function StaticPerson({ entity, position, selected, onSelect }: {
+function StaticPerson({ entity, position, selected, onSelect, uncertain = false }: {
   entity: World["entities"][number];
   position: Point;
   selected: boolean;
   onSelect: () => void;
+  uncertain?: boolean;
 }) {
   return <group position={[position[0], 0, position[1]]} onClick={onSelect} name={entity.name}>
-    <PersonModel color={entity.visual.color} selected={selected} />
+    <PersonModel color={entity.visual.color} selected={selected} uncertain={uncertain} />
+    {uncertain && <group position={[0, 1.13, 0]}>
+      <mesh position={[0, 0.08, 0]}>
+        <torusGeometry args={[0.09, 0.025, 6, 16, Math.PI * 1.6]} />
+        <meshBasicMaterial color={palette.gold} />
+      </mesh>
+      <mesh position={[0.035, -0.015, 0]}>
+        <sphereGeometry args={[0.025, 8, 8]} />
+        <meshBasicMaterial color={palette.gold} />
+      </mesh>
+    </group>}
+  </group>;
+}
+
+function UncertainCrate({ position, onSelect }: { position: Point; onSelect: () => void }) {
+  return <group position={[position[0], 0.08, position[1]]} onClick={onSelect} name="Uncertain flower location">
+    <mesh>
+      <octahedronGeometry args={[0.28, 0]} />
+      <meshBasicMaterial color={palette.gold} wireframe transparent opacity={0.7} />
+    </mesh>
+    <mesh position={[0, 0.35, 0]}>
+      <sphereGeometry args={[0.06, 8, 8]} />
+      <meshBasicMaterial color={palette.gold} />
+    </mesh>
   </group>;
 }
 
@@ -293,7 +319,6 @@ function WorldScene(props: DioramaProps) {
   const activeTime = momentFrame ? world.events.find(event => event.id === world.featuredMoment.eventId)!.at! : time;
   const delivery = result.events.find(event => event.id === roles.deliveryEventId);
   const originalDelivery = originalResult.events.find(event => event.id === originalWorld.presentation.roles.deliveryEventId);
-  const setup = result.events.find(event => event.id === roles.setupEventId);
   const featuredPlace = world.entities.find(entity => entity.id === world.featuredMoment.placeId);
   const plazaPosition = featuredPlace?.visual.position ?? [0, 0];
   const closureConnection = world.connections.find(connection => connection.id === world.visitorClosure.connectionId);
@@ -355,21 +380,29 @@ function WorldScene(props: DioramaProps) {
         {[-6.7, -3.7, 3.0, 6.8].map((x, index) => <Tree key={x} x={x} z={index % 2 ? 2.9 : -3} scale={index % 2 ? 0.82 : 1} />)}
 
         {world.entities.filter(entity => entity.kind === "person" && entity.id !== roles.courierEntityId).map(entity => {
-          const framePosition = entity.id === world.featuredMoment.photographerEntityId
-            ? world.featuredMoment.composition.photographerPosition
-            : world.featuredMoment.composition.subjectPositions.find(item => item.entityId === entity.id)?.position;
-          const staticPosition = momentFrame && world.featuredMoment.subjectEntityIds.includes(entity.id) && framePosition
-            ? framePosition
-            : entity.visual.position ?? [0, 0];
-          return <StaticPerson key={entity.id} entity={entity} position={staticPosition} selected={selected === entity.id} onSelect={() => onSelect(entity.id)} />;
+          if (momentFrame && world.featuredMoment.subjectEntityIds.includes(entity.id)) {
+            const presence = selectMomentEntityPresence(world, result, entity.id, activeTime);
+            if (presence.kind === "absent") return null;
+            const position = getMomentMarkerPosition(presence);
+            if (!position) return null;
+            return <StaticPerson key={entity.id} entity={entity} position={position} selected={selected === entity.id} uncertain={presence.kind === "uncertain"} onSelect={() => onSelect(entity.id)} />;
+          }
+          return <TravelingEntity key={entity.id} world={world} result={result} entityId={entity.id} timeRef={timeRef} kind="person" selected={selected === entity.id} visibleInMoment={!momentFrame} onSelect={() => onSelect(entity.id)} />;
         })}
 
         <TravelingEntity world={world} result={result} entityId={roles.courierEntityId} timeRef={momentFrame ? { current: activeTime } : timeRef} kind="person" selected={selected === roles.courierEntityId} visibleInMoment={!momentFrame} onSelect={() => onSelect(roles.courierEntityId)} />
         <TravelingEntity world={world} result={result} entityId={roles.vehicleEntityId} timeRef={momentFrame ? { current: activeTime } : timeRef} kind="vehicle" selected={selected === roles.vehicleEntityId} visibleInMoment={!momentFrame} onSelect={() => onSelect(roles.deliveryEventId)} />
 
-        {setup?.status === "possible" && setup.time !== null && activeTime >= setup.time
+        {isArrangementVisibleAt(world, result, activeTime, roles.floralEntityId)
           ? <FloralArrangement position={flowerPosition} onClick={() => onSelect(roles.setupEventId)} />
-          : <TravelingEntity world={world} result={result} entityId={roles.floralEntityId} timeRef={momentFrame ? { current: activeTime } : timeRef} kind="crate" selected={selected === roles.floralEntityId} visibleInMoment={!momentFrame || sampleEntity(world, result, roles.floralEntityId, activeTime).placeId === world.featuredMoment.placeId} onSelect={() => onSelect(roles.floralEntityId)} />}
+          : momentFrame
+            ? (() => {
+              const presence = selectMomentEntityPresence(world, result, roles.floralEntityId, activeTime);
+              if (presence.kind === "absent") return null;
+              if (presence.kind === "uncertain") return presence.position ? <UncertainCrate position={presence.position} onSelect={() => onSelect(roles.floralEntityId)} /> : null;
+              return <group position={[presence.position[0], 0, presence.position[1]]} onClick={() => onSelect(roles.floralEntityId)} name="Flower crates"><Crate color={world.entities.find(entity => entity.id === roles.floralEntityId)?.visual.color ?? "#ce8c9b"} /></group>;
+            })()
+            : <TravelingEntity world={world} result={result} entityId={roles.floralEntityId} timeRef={timeRef} kind="crate" selected={selected === roles.floralEntityId} visibleInMoment onSelect={() => onSelect(roles.floralEntityId)} />}
 
         {!momentFrame && compare && originalDelivery?.route && <>
           <RouteLine points={originalDelivery.route.path} color={palette.seaInk} opacity={0.68} dashed />

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { applyPatch, type Operation, type RealityPatch, type World } from "../world/model";
 import { compare, formatTime, getEvent, sampleEntity, sampleRoute, simulate } from "../engine/simulate";
 import { applyAlternative, keepThisMoment, type Goal, type SearchResult } from "../engine/search";
+import { selectMomentEntityPresence } from "../scene/momentPresence";
 
 const Diorama = dynamic(() => import("../scene/Diorama"), {
   ssr: false,
@@ -100,11 +101,12 @@ export default function Experience({ initialWorld, source, error }: { initialWor
     };
   }, [playing, reducedMotion, momentFrame, initialWorld.horizon, speed]);
 
-  const seek = useCallback((minute: number) => {
+  const seek = useCallback((minute: number, force = false) => {
+    if (momentFrame && !force) return;
     const next = Math.max(0, Math.min(initialWorld.horizon, minute));
     timeRef.current = next;
     setTime(next);
-  }, [initialWorld.horizon]);
+  }, [initialWorld.horizon, momentFrame]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -154,11 +156,21 @@ export default function Experience({ initialWorld, source, error }: { initialWor
   const activeLabel = sceneVersion === "original" ? "Original" : sceneVersion === "preview" && previewWorld ? "Recovery preview" : "Your variant";
   const activeTarget = getEvent(activeResult, goal.eventId);
   const activeSceneTime = momentFrame ? goal.time : time;
+  const effectiveTime = activeSceneTime;
+  const momentPresenceSummary = [...initialWorld.featuredMoment.subjectEntityIds, ...initialWorld.featuredMoment.propEntityIds]
+    .map(entityId => {
+      const entity = activeWorld.entities.find(item => item.id === entityId)!;
+      const presence = selectMomentEntityPresence(activeWorld, activeResult, entityId, effectiveTime);
+      const state = presence.kind === "present" ? "present" : presence.kind === "absent" ? "absent" : "uncertain";
+      const locationId = presence.kind === "absent" ? presence.placeId : presence.kind === "uncertain" ? presence.lastKnownPlaceId : undefined;
+      const location = locationId ? activeWorld.entities.find(item => item.id === locationId)?.name : undefined;
+      return `${entity.name}: ${state}${location ? ` · ${location}` : ""}`;
+    }).join(" · ");
   const courierSample = sampleEntity(activeWorld, activeResult, activeWorld.presentation.roles.courierEntityId, activeSceneTime);
   const courierPlace = courierSample.placeId ? activeWorld.entities.find(entity => entity.id === courierSample.placeId)?.name : undefined;
 
-  const delivery = getEvent(variantResult, roles.deliveryEventId);
-  const ceremony = getEvent(variantResult, roles.ceremonyEventId);
+  const activeDelivery = getEvent(activeResult, roles.deliveryEventId);
+  const activeCeremony = getEvent(activeResult, roles.ceremonyEventId);
   const artifact = activeResult.artifacts.find(item => item.id === roles.storyArtifactId)!;
   const selectedEvent = activeResult.events.find(event => event.id === selected);
   const selectedConnection = activeWorld.connections.find(connection => connection.id === selected);
@@ -173,34 +185,34 @@ export default function Experience({ initialWorld, source, error }: { initialWor
 
   const playbackLabel = (event: typeof eventRows[number], timing: string) => {
     if (event.status === "unknown") return "Indeterminate";
-    if (event.status === "impossible") return time >= (event.time ?? 0) ? "Moment missed" : "Impossible as planned";
+    if (event.status === "impossible") return effectiveTime >= (event.time ?? 0) ? "Moment missed" : "Impossible as planned";
     if (event.route) {
-      if (time >= event.route.arrive) return "Occurred";
-      const position = sampleRoute(event.route, time);
-      if (time >= event.route.plannedDepart && position.status === "waiting") {
+      if (effectiveTime >= event.route.arrive) return "Occurred";
+      const position = sampleRoute(event.route, effectiveTime);
+      if (effectiveTime >= event.route.plannedDepart && position.status === "waiting") {
         const stop = activeWorld.entities.find(entity => entity.id === position.placeId)?.name ?? "a stop";
         return "Waiting at " + stop;
       }
       if (position.status === "moving") return "In transit";
     }
-    if (event.time !== null && time >= event.time) return "Occurred";
+    if (event.time !== null && effectiveTime >= event.time) return "Occurred";
     return timing === "unchanged" ? "On schedule" : timing;
   };
 
   const eventStatusMessage = (event: typeof eventRows[number]) => {
     if (event.status === "unknown") return "Available data cannot settle this event.";
-      if (event.status === "impossible") return time >= (event.time ?? 0) ? "This moment was missed." : "This event cannot happen as planned.";
+      if (event.status === "impossible") return effectiveTime >= (event.time ?? 0) ? "This moment was missed." : "This event cannot happen as planned.";
       if (event.route) {
-        if (time >= event.route.arrive) return "This delivery occurred at " + displayTime(event.route.arrive) + ".";
-        const position = sampleRoute(event.route, time);
-        if (time >= event.route.plannedDepart && position.status === "waiting") {
+        if (effectiveTime >= event.route.arrive) return "This delivery occurred at " + displayTime(event.route.arrive) + ".";
+        const position = sampleRoute(event.route, effectiveTime);
+        if (effectiveTime >= event.route.plannedDepart && position.status === "waiting") {
           const stop = activeWorld.entities.find(entity => entity.id === position.placeId)?.name ?? "an available connection";
           return "The courier is waiting at " + stop + ". Delivery is expected at " + displayTime(event.route.arrive) + ".";
         }
         if (position.status === "moving") return "The courier is in transit. Delivery is expected at " + displayTime(event.route.arrive) + ".";
     }
     const completion = event.time;
-    if (completion !== null && time >= completion) return "This event occurred at " + displayTime(completion) + ".";
+    if (completion !== null && effectiveTime >= completion) return "This event occurred at " + displayTime(completion) + ".";
     return "This event can happen at " + displayTime(completion) + ".";
   };
 
@@ -215,7 +227,7 @@ export default function Experience({ initialWorld, source, error }: { initialWor
     setMomentFrame(false);
     setSelected(initialWorld.visitorClosure.connectionId);
     setPlaying(false);
-    seek(20);
+    seek(20, true);
   };
 
   const keepMoment = () => {
@@ -226,13 +238,13 @@ export default function Experience({ initialWorld, source, error }: { initialWor
     setSelected(goal.eventId);
     setPlaying(false);
     setMomentFrame(true);
-    seek(goal.time);
+    seek(goal.time, true);
   };
 
   const chooseAlternative = (alternativeId: string) => {
     setPreviewId(alternativeId);
     setSceneVersion("preview");
-    seek(goal.time);
+    seek(goal.time, true);
   };
 
   const applyChosen = () => {
@@ -244,7 +256,7 @@ export default function Experience({ initialWorld, source, error }: { initialWor
     setSceneVersion("variant");
     setSelected(goal.eventId);
     setPlaying(false);
-    seek(goal.time);
+    seek(goal.time, true);
   };
 
   const reset = () => {
@@ -255,7 +267,7 @@ export default function Experience({ initialWorld, source, error }: { initialWor
     setMomentFrame(false);
     setSelected(initialWorld.visitorClosure.connectionId);
     setPlaying(false);
-    seek(20);
+    seek(20, true);
   };
 
   const claimMessage = artifact.compatibility === "supported"
@@ -284,13 +296,13 @@ export default function Experience({ initialWorld, source, error }: { initialWor
 
       <section className="workspace">
         <div className="scene-shell">
-          <div className="scene-meta"><span>{initialWorld.title.toUpperCase()}</span><strong>{displayTime(time)}</strong></div>
+          <div className="scene-meta"><span>{initialWorld.title.toUpperCase()}</span><strong data-testid="scene-clock">{displayTime(effectiveTime)}</strong></div>
           {webgl === false ? (
             <div className="fallback">
               <h2>3D view unavailable</h2>
               <p>WebGL could not start. This text view follows the same verified events and timeline.</p>
               <ul>{activeWorld.entities.filter(entity => entity.kind === "place").map(place => <li key={place.id}>{place.name}</li>)}</ul>
-              <p>At {displayTime(time)}, delivery is {delivery.status}, the featured photograph is {activeTarget.status}, and the ceremony is {ceremony.status}.</p>
+              <p>At {displayTime(effectiveTime)}, delivery is {activeDelivery.status}, the featured photograph is {activeTarget.status}, and the ceremony is {activeCeremony.status}.</p>
             </div>
           ) : (
             <Diorama
@@ -298,7 +310,7 @@ export default function Experience({ initialWorld, source, error }: { initialWor
               result={activeResult}
               originalWorld={initialWorld}
               originalResult={originalResult}
-              time={time}
+              time={effectiveTime}
               timeRef={timeRef}
               compare={compareOn && sceneVersion !== "original"}
               preview={sceneVersion === "preview"}
@@ -332,6 +344,7 @@ export default function Experience({ initialWorld, source, error }: { initialWor
                 <button className={sceneVersion === "variant" ? "selected" : ""} onClick={() => setSceneVersion("variant")}>Your variant</button>
                 {previewWorld && <button className={sceneVersion === "preview" ? "selected" : ""} onClick={() => setSceneVersion("preview")}>Recovery preview</button>}
               </div>
+              <small className="moment-presence" aria-label="Moment participant presence">{momentPresenceSummary}</small>
               <button className="frame-close" onClick={() => setMomentFrame(false)}>Return to neighborhood</button>
             </div>
           )}
@@ -391,8 +404,8 @@ export default function Experience({ initialWorld, source, error }: { initialWor
       <section className="bottom">
         <div className="timeline" aria-label="Scenario timeline">
           <button className="play" onClick={() => setPlaying(value => !value)} disabled={reducedMotion || momentFrame} aria-label={playing ? "Pause" : "Play"}>{playing ? "Ⅱ" : "▶"}</button>
-          <label htmlFor="time-slider">TIME <strong>{displayTime(time)}</strong></label>
-          <input id="time-slider" aria-label="Seek scenario time" type="range" min="0" max={initialWorld.horizon} step="0.05" value={time} onChange={event => seek(Number(event.target.value))} />
+          <label htmlFor="time-slider">TIME <strong data-testid="timeline-clock">{displayTime(effectiveTime)}</strong></label>
+          <input id="time-slider" aria-label="Seek scenario time" type="range" min="0" max={initialWorld.horizon} step="0.05" value={effectiveTime} disabled={momentFrame} onChange={event => seek(Number(event.target.value))} />
           <span>{displayTime(initialWorld.horizon)}</span>
           <label className="speed-control">SPEED
             <select aria-label="Playback speed" value={speed} onChange={event => setSpeed(Number(event.target.value))}>
@@ -405,7 +418,7 @@ export default function Experience({ initialWorld, source, error }: { initialWor
         <div className="moment">
           <div>
             <span className="eyebrow">THE MOMENT TO KEEP</span>
-            <h2>{activeTarget.status === "possible" ? sceneVersion === "preview" ? "Recovery preview keeps the photograph possible at " + displayTime(goal.time) + "." : time >= goal.time ? "The photograph happened at " + displayTime(goal.time) + "." : "The photograph can happen." : activeTarget.status === "unknown" ? "The photograph remains indeterminate." : time >= goal.time ? "The photograph is now a missed moment." : "The photograph cannot happen as planned."}</h2>
+            <h2>{activeTarget.status === "possible" ? sceneVersion === "preview" ? "Recovery preview keeps the photograph possible at " + displayTime(goal.time) + "." : effectiveTime >= goal.time ? "The photograph happened at " + displayTime(goal.time) + "." : "The photograph can happen." : activeTarget.status === "unknown" ? "The photograph remains indeterminate." : effectiveTime >= goal.time ? "The photograph is now a missed moment." : "The photograph cannot happen as planned."}</h2>
             <p>{displayTime(goal.time)} · {initialWorld.entities.find(entity => entity.id === goal.placeId)?.name} · {initialWorld.featuredMoment.subjectEntityIds.map(id => initialWorld.entities.find(entity => entity.id === id)?.name ?? id).join(", ")} · {initialWorld.entities.find(entity => entity.id === initialWorld.featuredMoment.propEntityIds[0])?.name}</p>
             {activeTarget.status === "impossible" && <small>The original composition remains available in MomentFrame. Its flowers do not appear in {activeLabel.toLowerCase()} before delivery and setup.</small>}
             {activeTarget.status === "unknown" && <small>Missing or incomplete world data cannot establish whether this composition is possible.</small>}
