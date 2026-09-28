@@ -27,8 +27,10 @@ export function explainIntervention(world: World, result: Simulation, operations
   const setup = getEvent(result, world.presentation.roles.setupEventId);
   const route = delivery.route?.connectionIds.map(id => world.connections.find(connection => connection.id === id)?.label ?? id).join(" → ");
   const wait = delivery.route?.itinerary.find(step => step.kind === "wait");
-  const departure = operations.find((operation): operation is Extract<Operation, { type: "setEventTime" }> => operation.type === "setEventTime");
-  const action = departure ? `Departure moves to ${clock(world, departure.value)}. ` : `Departure stays at ${clock(world, delivery.route?.plannedDepart ?? null)}. `;
+  const departures = operations.filter((operation): operation is Extract<Operation, { type: "setEventTime" }> => operation.type === "setEventTime");
+  const action = departures.length
+    ? departures.map(operation => `${world.events.find(event => event.id === operation.eventId)?.name ?? operation.eventId} departure moves to ${clock(world, operation.value)}. `).join("")
+    : `Delivery departure stays at ${clock(world, delivery.route?.plannedDepart ?? null)}. `;
   const waiting = wait?.kind === "wait" ? `The courier waits at ${world.entities.find(entity => entity.id === wait.placeId)?.name ?? wait.placeId} until ${clock(world, wait.end)}. ` : "";
   return `${action}${route ? `The route uses ${route}. ` : ""}${waiting}${name(delivery.name)} finishes at ${clock(world, delivery.time)}; ${name(setup.name)} is ready at ${clock(world, setup.time)}. The bridge closure stays in place.`;
 }

@@ -3,7 +3,7 @@ import { compare, getEvent, simulate, type Simulation } from "./simulate";
 
 export type Goal = { eventId: string; time: number; placeId: string; requiredTypes: string[] };
 export type Alternative = { id: string; operations: Operation[]; result: Simulation; differences: ReturnType<typeof compare>; shiftMinutes: number };
-export type SearchResult = { status: "already-satisfied" | "found" | "exhausted" | "limit-reached" | "indeterminate"; alternatives: Alternative[]; groupedCount: number; examined: number; domainSize: number; maxCandidates: number; maxInterventions: number };
+export type SearchResult = { status: "already-satisfied" | "found" | "exhausted" | "limit-reached" | "indeterminate"; alternatives: Alternative[]; meaningfulCount: number; groupedCount: number; examined: number; domainSize: number; maxCandidates: number; maxInterventions: number };
 export type SearchConstraints = { departureNotBefore?: { eventId: string; minute: number } };
 export type SearchOptions = { maxCandidates?: number; maxInterventions?: number; constraints?: SearchConstraints };
 
@@ -24,7 +24,7 @@ export function keepThisMoment(world: World, currentPatch: RealityPatch, goal: G
   if (departure && (variant.events.find(event => event.id === departure.eventId)?.at ?? -1) < departure.minute) throw new Error("Current variant violates the departure constraint");
   const bounds = { examined: 0, domainSize: 0, maxCandidates: options.maxCandidates ?? 30, maxInterventions: options.maxInterventions ?? 2 };
   if (!Number.isInteger(bounds.maxCandidates) || bounds.maxCandidates < 0 || !Number.isInteger(bounds.maxInterventions) || bounds.maxInterventions < 1) throw new Error("Invalid search limit");
-  if (getEvent(baseline, goal.eventId).status === "possible") return { status: "already-satisfied", alternatives: [], groupedCount: 0, ...bounds };
+  if (getEvent(baseline, goal.eventId).status === "possible") return { status: "already-satisfied", alternatives: [], meaningfulCount: 0, groupedCount: 0, ...bounds };
   const operations: Operation[] = [];
   for (const i of variant.interventions) {
     if (i.type === "setEventTime") for (const value of i.values) if (value !== variant.events.find(e => e.id === i.eventId)?.at && (i.eventId !== departure?.eventId || value >= departure.minute)) operations.push({ type: "setEventTime", eventId: i.eventId, value });
@@ -57,7 +57,7 @@ export function keepThisMoment(world: World, currentPatch: RealityPatch, goal: G
     if (redundant) groupedCount++;
     else meaningful.push(alternative);
   }
-  return { status: bounds.examined < bounds.domainSize ? "limit-reached" : meaningful.length ? "found" : unknown ? "indeterminate" : "exhausted", alternatives: meaningful.slice(0, 3), groupedCount, ...bounds };
+  return { status: bounds.examined < bounds.domainSize ? "limit-reached" : meaningful.length ? "found" : unknown ? "indeterminate" : "exhausted", alternatives: meaningful.slice(0, 3), meaningfulCount: meaningful.length, groupedCount, ...bounds };
 }
 
 export function applyAlternative(world: World, patch: RealityPatch, goal: Goal, chosen: Alternative, options: SearchOptions = {}): RealityPatch {

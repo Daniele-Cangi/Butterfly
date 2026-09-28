@@ -22,6 +22,21 @@ describe("a clearer recovery domain", () => {
     expect(search.alternatives.map(alternative => getEvent(alternative.result, "delivery").route?.connectionIds)).toEqual([["land-to-pier", "ferry", "landing-road"], ["bridge"]]);
   });
 
+  it("reports the full distinct count when the card selection is capped", () => {
+    const expanded = structuredClone(sampleWorld);
+    const overland = expanded.connections.find(connection => connection.id === "land")!;
+    for (const [id, duration] of [["short-road", 20], ["fast-road", 15]] as const) {
+      expanded.connections.push({ ...structuredClone(overland), id, label: id, duration, enabled: false });
+      expanded.interventions.push({ type: "enableConnection", connectionId: id, values: [true], precondition: { requiredMode: "van" } });
+    }
+    const result = keepThisMoment(validateWorld(expanded), closed, goal);
+    expect(result.status).toBe("found");
+    expect(result.examined).toBe(result.domainSize);
+    expect(result.meaningfulCount).toBeGreaterThan(3);
+    expect(result.alternatives).toHaveLength(3);
+    expect(result.meaningfulCount).toBeGreaterThan(result.alternatives.length);
+  });
+
   it("honors a departure limit and recomputes a later ferry opening", () => {
     const limited = keepThisMoment(sampleWorld, closed, goal, departureLimit);
     expect(limited.alternatives).toHaveLength(1);
@@ -58,5 +73,19 @@ describe("a clearer recovery domain", () => {
     expect(explainDay(applyPatch(world, closed), simulate(applyPatch(world, closed)))).toContain("Hillside lane");
     const ferry = keepThisMoment(sampleWorld, closed, goal).alternatives.find(alternative => alternative.operations.some(operation => operation.type === "enableConnection"))!;
     expect(explainIntervention(applyPatch(sampleWorld, closed), ferry.result, ferry.operations)).toContain("16:40");
+  });
+
+  it("names the actual transport when a time intervention does not move the delivery", () => {
+    const expanded = structuredClone(sampleWorld);
+    expanded.events.push({ id: "scout", worldId: expanded.id, kind: "transport", name: "Scout trip", at: 20, from: "depot", to: "plaza", mode: "van", actorIds: [], requirements: [], effects: [] });
+    expanded.interventions.push({ type: "setEventTime", eventId: "scout", values: [0, 20], precondition: { minAvailableAt: 0 } });
+    const world = validateWorld(expanded);
+    const operation = { type: "setEventTime" as const, eventId: "scout", value: 0 };
+    const variant = applyPatch(world, closed);
+    const preview = simulate(applyPatch(variant, { worldId: world.id, baseRevision: world.baseRevision, operations: [operation] }, closed.operations));
+    const explanation = explainIntervention(variant, preview, [operation]);
+    expect(explanation).toContain("Scout trip departure moves to 16:00");
+    expect(explanation).not.toContain("Flower delivery departure moves");
+    expect(getEvent(preview, "delivery").time).toBe(55);
   });
 });
