@@ -9,3 +9,4 @@
 @media(max-width:650px){.scene-shell{min-height:380px}}
 .swatch.recovery{background:#d2a037}
 @media(max-width:650px){.scene-version{right:10px;top:12px}.scene-presence{left:15px;top:54px;max-width:45%;font-size:9px}.moment-frame-controls{top:49px;right:8px;width:min(315px,calc(100% - 16px));padding:10px}.moment-frame-controls>div:first-child strong{font-size:14px}.version-tabs button{padding:6px 7px;font-size:9px}.scene-legend{max-width:calc(100% - 20px);flex-wrap:wrap}.timeline{height:auto;min-height:74px;padding:8px 10px;gap:7px;flex-wrap:wrap}.timeline label{min-width:54px}.timeline label strong{font-size:17px}.timeline input{min-width:70px}.timeline .speed-control{font-size:8px}.timeline .quiet{white-space:nowrap}.event-row{grid-template-columns:18px minmax(90px,1fr) auto;gap:4px}.event-row b{font-size:9px}.side h1{font-size:29px}}
+.moment-presence{display:block;color:#66736b;font-size:10px;line-height:1.45}

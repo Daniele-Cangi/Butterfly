@@ -1,10 +1,9 @@
-import { createClient } from "@sanity/client";
-import { loadEnvConfig } from "@next/env";
 import { pointerId, WORLD_ID } from "../src/sanity/read";
-loadEnvConfig(process.cwd());
-const projectId=process.env.NEXT_PUBLIC_SANITY_PROJECT_ID,dataset=process.env.NEXT_PUBLIC_SANITY_DATASET,token=process.env.SANITY_API_TOKEN;
-if(!projectId||dataset!=="butterfly"||!token)throw new Error("Set a dedicated project ID, butterfly dataset and server-side SANITY_API_TOKEN");
-const client=createClient({projectId,dataset,token,useCdn:false,apiVersion:"2025-02-19"});
-const pointer=await client.getDocument<{worldId:string;_rev:string;activeRevisionId:string}>(pointerId);
+import { loadLocalEnv } from "./loadLocalEnv";
+import { createAuthorizedSanityClient } from "./sanityClient";
+loadLocalEnv();
+const client = createAuthorizedSanityClient();
+const pointer=await client.getDocument<{_id:string;worldId:string;_rev:string;activeRevisionId:string}>(pointerId);
 if(!pointer||pointer.worldId!==WORLD_ID)throw new Error("Butterfly pointer missing or world mismatch");
-console.log(JSON.stringify({pointerId,_rev:pointer._rev,activeRevisionId:pointer.activeRevisionId},null,2));
+if(pointer.activeRevisionId){const revision=await client.getDocument<{_id:string;revisionId:string;worldId:string;snapshotJson:string}>(pointer.activeRevisionId);if(!revision||revision._id!==pointer.activeRevisionId||revision.revisionId!==pointer.activeRevisionId||revision.worldId!==WORLD_ID)throw new Error("Active pointer does not identify a matching frozen revision");}
+console.log(JSON.stringify({pointerId,_rev:pointer._rev,worldId:pointer.worldId,activeRevisionId:pointer.activeRevisionId||null},null,2));

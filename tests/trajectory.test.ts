@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sampleWorld } from "../fixtures/harbor";
 import { keepThisMoment, type Goal } from "../src/engine/search";
-import { findRoute, getEvent, sampleEntity, sampleRoute, simulate } from "../src/engine/simulate";
+import { findRoute, formatTime, getEvent, sampleEntity, sampleRoute, simulate } from "../src/engine/simulate";
 import { applyPatch, validateWorld, type RealityPatch, type World } from "../src/world/model";
 
 const closeBridge = (): RealityPatch => ({
@@ -16,6 +16,11 @@ const featuredGoal = (world: World): Goal => {
 };
 
 describe("timed route sampling", () => {
+  it("formats fractional playhead minutes to HH:mm using nearest-minute display rounding", () => {
+    expect(formatTime(20.05, 960)).toBe("16:20");
+    expect(formatTime(20.5, 960)).toBe("16:21");
+  });
+
   it("samples explicit road, bridge and road leg times by distance, independent of seek order", () => {
     const result = simulate(sampleWorld);
     const route = getEvent(result, sampleWorld.presentation.roles.deliveryEventId).route!;
@@ -52,6 +57,54 @@ describe("timed route sampling", () => {
     expect(sampleRoute(route, 32)).toMatchObject({ status: "moving", connectionId: "second-leg" });
     expect(getEvent(result, world.presentation.roles.setupEventId).time).toBe(50);
     expect(getEvent(result, world.featuredMoment.eventId).status).toBe("possible");
+  });
+
+  it("uses the same depot and intermediate-stop locations for requirements and sampling", () => {
+    const world = structuredClone(sampleWorld);
+    world.connections.find(connection => connection.id === "bridge")!.enabled = false;
+    world.connections.find(connection => connection.id === "land")!.enabled = false;
+    world.connections.find(connection => connection.id === "ferry")!.enabled = true;
+    world.events.push({
+      id: "pier-presence-check",
+      worldId: world.id,
+      kind: "fixed",
+      name: "Pier presence check",
+      at: 29,
+      requirements: [{ type: "entityAt", entityId: world.presentation.roles.courierEntityId, placeId: world.presentation.roles.pierPlaceId }],
+      actorIds: [],
+      effects: [],
+    });
+    const checked = validateWorld(world);
+    const result = simulate(checked);
+    const route = getEvent(result, checked.presentation.roles.deliveryEventId).route!;
+
+    expect(sampleRoute(route, 19)).toMatchObject({ status: "waiting", placeId: "depot", position: [-5, -1] });
+    expect(sampleEntity(checked, result, checked.presentation.roles.courierEntityId, 19)).toMatchObject({ status: "at-place", placeId: "depot", position: [-5, -1] });
+    expect(getEvent(result, "pier-presence-check").status).toBe("possible");
+    expect(getEvent(result, "pier-presence-check").reasons[0].observed).toBe("pier");
+    expect(sampleEntity(checked, result, checked.presentation.roles.courierEntityId, 29)).toMatchObject({ status: "waiting", placeId: "pier", position: [-2.7, 2.5] });
+    expect(sampleEntity(checked, result, checked.presentation.roles.courierEntityId, 33)).toMatchObject({ status: "moving", role: "ferry" });
+    expect(sampleEntity(checked, result, checked.presentation.roles.courierEntityId, 33).placeId).toBeUndefined();
+  });
+
+  it("keeps a known intermediate wait place during an initial connection wait", () => {
+    const world = structuredClone(sampleWorld);
+    world.connections.find(connection => connection.id === "bridge")!.windows = [{ start: 30, end: 60 }];
+    world.connections.find(connection => connection.id === "land")!.enabled = false;
+    world.events.push({
+      id: "depot-wait-check",
+      worldId: world.id,
+      kind: "fixed",
+      name: "Depot wait check",
+      at: 25,
+      requirements: [{ type: "entityAt", entityId: "courier", placeId: "depot" }],
+      actorIds: [],
+      effects: [],
+    });
+    const checked = validateWorld(world);
+    const result = simulate(checked);
+    expect(getEvent(result, "depot-wait-check").status).toBe("possible");
+    expect(sampleEntity(checked, result, "courier", 25)).toMatchObject({ status: "waiting", placeId: "depot", position: [-5, -1] });
   });
 
   it("keeps boundary arrival exact and samples the ferry only during its ferry segment", () => {

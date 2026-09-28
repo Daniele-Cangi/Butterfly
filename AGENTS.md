@@ -1,9 +1,11 @@
 # Butterfly agent notes
 
 - Keep the engine pure TypeScript and deterministic. Never make story outcomes depend on display labels.
+- Use the same temporal position sampler for `entityAt` and scene actors. A route in progress has no definite place; an intermediate wait does.
+- While MomentFrame is open, render every panel and clock at its authored target time. Keep seek locked until the visitor exits the frame.
 - Validate every world, reference, patch and publication outside Studio. Preserve `baseRevision`, the visitor closure and the featured moment during recovery.
 - Never place a Sanity write token in `NEXT_PUBLIC_*`, browser code, fixtures or logs. Public Apply changes only local variant state.
-- Preserve editorial documents. Seed with `createIfNotExists`; publish only via an authorized CLI call with the current pointer `_rev`.
+- Preserve editorial documents. Seed with `createIfNotExists`; publish only via an authorized CLI call with the current pointer `_rev`. Stop when the authenticated role lacks dataset permissions; never bypass it.
 - Run `npm run typecheck`, `npm run lint`, `npm test`, `npm run test:browser` and `npm run build` after behavioral changes. Review the generated screenshots.
 
 <!-- BEGIN:nextjs-agent-rules -->
