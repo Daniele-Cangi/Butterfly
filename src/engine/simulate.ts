@@ -5,9 +5,9 @@ export type Reason = { requirement: Requirement | { type: "route" }; observed: s
 export type TravelRole = "road" | "bridge" | "ferry";
 export type TimedGeometry = { role: TravelRole; start: number; end: number; path: [number, number][] };
 export type RouteStep =
-  | { kind: "wait"; placeId: string; start: number; end: number; position: [number, number] }
+  | { kind: "wait"; placeId: string; start: number; end: number; position?: [number, number] }
   | { kind: "movement"; connectionId: string; from: string; to: string; start: number; end: number; geometry: TimedGeometry[] };
-export type Route = { from: string; to: string; fromPosition: [number, number]; toPosition: [number, number]; connectionIds: string[]; plannedDepart: number; depart: number; arrive: number; path: [number, number][]; itinerary: RouteStep[] };
+export type Route = { from: string; to: string; fromPosition?: [number, number]; toPosition?: [number, number]; connectionIds: string[]; plannedDepart: number; depart: number; arrive: number; path: [number, number][]; itinerary: RouteStep[] };
 export type EventResult = { id: string; name: string; time: number | null; status: Feasibility; route?: Route; reasons: Reason[] };
 export type ArtifactResult = { id: string; title: string; compatibility: "supported" | "unsupported" | "unknown"; causes: string[] };
 export type Simulation = { worldId: string; revision: string; events: EventResult[]; artifacts: ArtifactResult[]; derivedFacts: {key:string;value:string|number|boolean;source:"derived";eventId:string;interval:{start:number;end:number}}[] };
@@ -46,9 +46,8 @@ export function findRoute(world: World, from: string, to: string, mode: string, 
       const nextPath = [...state.path, ...geometryPath.slice(state.path.length ? 1 : 0)];
       const nextSteps: RouteStep[] = [...state.itinerary];
       if (timing.depart > state.time) {
-        const position = world.entities.find(entity => entity.id === current)?.visual.position;
-        if (!position) continue;
-        nextSteps.push({ kind: "wait", placeId: current, start: state.time, end: timing.depart, position });
+        const position = state.path.at(-1) ?? world.entities.find(entity => entity.id === current)?.visual.position ?? geometryPath[0];
+        nextSteps.push({ kind: "wait", placeId: current, start: state.time, end: timing.depart, ...(position ? { position } : {}) });
       }
       let segmentTime = timing.depart;
       const timedGeometry = connectionGeometry.map(segment => {
@@ -67,9 +66,23 @@ export function findRoute(world: World, from: string, to: string, mode: string, 
   }
   const found = best.get(to);
   if (!found) return undefined;
+  const routeOrigin = found.path[0];
+  const routeDestination = found.path.at(-1);
   const destination = world.entities.find((entity: Place) => entity.id === to)?.visual.position;
-  if (!origin || !destination) return undefined;
-  return { from, to, fromPosition: origin, toPosition: destination, connectionIds: found.ids, plannedDepart: start, depart: found.ids.length ? found.depart : start, arrive: found.time, path: found.path, itinerary: found.itinerary };
+  const fromPosition = origin ?? routeOrigin;
+  const toPosition = destination ?? routeDestination;
+  return {
+    from,
+    to,
+    ...(fromPosition ? { fromPosition } : {}),
+    ...(toPosition ? { toPosition } : {}),
+    connectionIds: found.ids,
+    plannedDepart: start,
+    depart: found.ids.length ? found.depart : start,
+    arrive: found.time,
+    path: found.path,
+    itinerary: found.itinerary,
+  };
 }
 
 function earliestPossibleCompletion(world: World, event: Event): number | undefined {
@@ -173,16 +186,17 @@ function pointAlongPath(path: [number, number][], progress: number): [number, nu
 }
 
 export function sampleRoute(route: Route, minute: number): PositionSample {
-  if (minute < route.plannedDepart) return { status: "waiting", position: route.fromPosition, placeId: route.from };
+  if (minute < route.plannedDepart) return { status: "waiting", ...(route.fromPosition ? { position: route.fromPosition } : {}), placeId: route.from };
   for (const step of route.itinerary) {
-    if (step.kind === "wait" && minute >= step.start && minute < step.end) return { status: "waiting", position: step.position, placeId: step.placeId };
+    if (step.kind === "wait" && minute >= step.start && minute < step.end) return { status: "waiting", ...(step.position ? { position: step.position } : {}), placeId: step.placeId };
     if (step.kind === "movement" && minute >= step.start && minute < step.end) {
       const geometry = step.geometry.find(segment => minute >= segment.start && minute < segment.end) ?? step.geometry.at(-1);
       if (!geometry) return { status: "moving", position: pointAlongPath(route.path, (minute - step.start) / Math.max(step.end - step.start, 1)), connectionId: step.connectionId };
       return { status: "moving", position: pointAlongPath(geometry.path, (minute - geometry.start) / Math.max(geometry.end - geometry.start, 1)), connectionId: step.connectionId, role: geometry.role };
     }
   }
-  return { status: "at-place", position: route.path.length ? pointAlongPath(route.path, 1) : route.toPosition, placeId: route.to };
+  const position = route.path.length ? pointAlongPath(route.path, 1) : route.toPosition;
+  return { status: "at-place", ...(position ? { position } : {}), placeId: route.to };
 }
 
 export function sampleEntity(world: World, simulation: Simulation, entityId: string, minute: number): PositionSample {
@@ -208,8 +222,8 @@ function resolveEntityPosition(world: World, results: ReadonlyMap<string, EventR
     position = world.entities.find(candidate => candidate.id === placeId)?.visual.position ?? position;
     lastMovement = event.id;
   }
-  return position && placeId
-    ? { sample: { status: "at-place", position, placeId }, causes: lastMovement ? [lastMovement] : [] }
+  return placeId
+    ? { sample: { status: "at-place", ...(position ? { position } : {}), placeId }, causes: lastMovement ? [lastMovement] : [] }
     : { sample: { status: "unknown", ...(position ? { position } : {}), ...(placeId ? { placeId } : {}) }, causes: [] };
 }
 

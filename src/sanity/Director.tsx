@@ -23,8 +23,6 @@ export default function Director() {
 
   useEffect(() => {
     let active = true;
-    setRefreshing(true);
-    setError(null);
     const reload = async () => {
       try {
         const [draft, published] = await Promise.all([
@@ -70,7 +68,7 @@ export default function Director() {
       <div>
         <h1 style={{ margin: 0 }}>Director · {world.title}</h1>
         <p style={{ margin: "4px 0" }}>Draft data through the same validator, engine and scene. Publishing requires the authorized CLI.</p>
-        <button onClick={() => setReloadCount(count => count + 1)}>Reload draft</button>
+        <button onClick={() => { setRefreshing(true); setError(null); setReloadCount(count => count + 1); }}>Reload draft</button>
         <p style={{ margin: "4px 0", fontSize: 12 }}>Featured photograph · {formatTime(world.events.find(event => event.id === world.featuredMoment.eventId)?.at ?? null, world.originMinute)} · {photo.status}</p>
       </div>
       <div style={{ position: "relative", minHeight: 420, background: "#e8e4d9" }}>

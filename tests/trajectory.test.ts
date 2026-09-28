@@ -132,6 +132,18 @@ describe("timed route sampling", () => {
     expect(result.artifacts.find(artifact => artifact.id === world.presentation.roles.storyArtifactId)?.compatibility).toBe("unknown");
   });
 
+  it("keeps semantic places known when optional visual coordinates are absent", () => {
+    const world = structuredClone(sampleWorld);
+    for (const entity of world.entities) delete entity.visual.position;
+    const checked = validateWorld(world);
+    const result = simulate(checked);
+
+    expect(sampleEntity(checked, result, checked.presentation.roles.courierEntityId, 0)).toEqual({ status: "at-place", placeId: "depot" });
+    expect(sampleEntity(checked, result, checked.presentation.roles.courierEntityId, 30)).toEqual({ status: "at-place", placeId: "plaza" });
+    expect(getEvent(result, checked.featuredMoment.eventId).status).toBe("possible");
+    expect(result.artifacts.find(artifact => artifact.id === checked.presentation.roles.storyArtifactId)?.compatibility).toBe("supported");
+  });
+
   it("does not produce NaN for a positive-duration route with coincident geometry", () => {
     const world = structuredClone(sampleWorld);
     world.entities.push({ id: "nearby", worldId: world.id, kind: "place", name: "Nearby", visual: { kind: "place", color: "#c4b69c", position: [-5, -1] } });

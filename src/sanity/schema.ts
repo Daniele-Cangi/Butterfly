@@ -15,11 +15,11 @@ const eventKinds = [
 const routeRoles = ["road", "bridge", "ferry"].map(value => ({ title: value[0].toUpperCase() + value.slice(1), value }));
 const entityKinds = ["person", "place", "object"].map(value => ({ title: value[0].toUpperCase() + value.slice(1), value }));
 
-function visibleWhen(field: string, values: string[]) {
-  return ({ parent }: { parent?: Record<string, unknown> }) => values.includes(String(parent?.[field] ?? ""));
+function hiddenUnless(field: string, values: string[]) {
+  return ({ parent }: { parent?: Record<string, unknown> }) => !values.includes(String(parent?.[field] ?? ""));
 }
 
-function integerField(name: string, title = name, minimum = 0, hidden?: ReturnType<typeof visibleWhen>) {
+function integerField(name: string, title = name, minimum = 0, hidden?: ReturnType<typeof hiddenUnless>) {
   return defineField({
     name,
     title,
@@ -32,7 +32,7 @@ function integerField(name: string, title = name, minimum = 0, hidden?: ReturnTy
   });
 }
 
-function requiredString(name: string, title = name, hidden?: ReturnType<typeof visibleWhen>) {
+function requiredString(name: string, title = name, hidden?: ReturnType<typeof hiddenUnless>) {
   return defineField({
     name,
     title,
@@ -113,7 +113,7 @@ const entity = defineType({
   fields: [
     requiredString("id"), requiredString("worldId"),
     defineField({ name: "kind", title: "Kind", type: "string", options: { list: entityKinds }, validation: rule => rule.required() }),
-    requiredString("name"), requiredString("initialPlaceId", "Initial place"),
+    requiredString("name"), requiredString("initialPlaceId", "Initial place", hiddenUnless("kind", ["person", "object"])),
     defineField({ name: "visual", type: "butterflyVisual", validation: rule => rule.required() }),
   ],
 });
@@ -170,10 +170,10 @@ const requirement = defineType({
   type: "object",
   fields: [
     defineField({ name: "operator", title: "Requirement", type: "string", options: { list: requirementOperators }, validation: rule => rule.required() }),
-    requiredString("eventId", "Required event", visibleWhen("operator", ["eventOccurred"])),
-    requiredString("entityId", "Entity", visibleWhen("operator", ["entityAt"])),
-    requiredString("placeId", "Required place", visibleWhen("operator", ["entityAt"])),
-    requiredString("key", "Fact key", visibleWhen("operator", ["factEquals"])),
+    requiredString("eventId", "Required event", hiddenUnless("operator", ["eventOccurred"])),
+    requiredString("entityId", "Entity", hiddenUnless("operator", ["entityAt"])),
+    requiredString("placeId", "Required place", hiddenUnless("operator", ["entityAt"])),
+    requiredString("key", "Fact key", hiddenUnless("operator", ["factEquals"])),
     defineField({ name: "valueJson", title: "Expected JSON primitive", type: "string", hidden: ({ parent }) => parent?.operator !== "factEquals", validation: (rule, context) => context?.hidden ? rule.skip() : rule.required().custom(value => {
       if (typeof value !== "string") return "Enter a JSON string, number, or boolean.";
       try { const parsed: unknown = JSON.parse(value); return typeof parsed === "string" || typeof parsed === "number" || typeof parsed === "boolean" ? true : "Use a JSON string, number, or boolean."; }
@@ -191,14 +191,14 @@ const event = defineType({
   fields: [
     requiredString("id"), requiredString("worldId"), requiredString("name"),
     defineField({ name: "kind", title: "Event rule", type: "string", options: { list: eventKinds }, validation: rule => rule.required() }),
-    integerField("at", "Scheduled minute", 0, visibleWhen("kind", ["fixed", "transport"])),
-    requiredString("afterEventId", "Preceding event", visibleWhen("kind", ["dependent"])),
-    integerField("delay", "Delay in minutes", 0, visibleWhen("kind", ["dependent"])),
+    integerField("at", "Scheduled minute", 0, hiddenUnless("kind", ["fixed", "transport"])),
+    requiredString("afterEventId", "Preceding event", hiddenUnless("kind", ["dependent"])),
+    integerField("delay", "Delay in minutes", 0, hiddenUnless("kind", ["dependent"])),
     arrayField("requirements", "butterflyRequirement", "Typed requirements"),
     arrayField("actorIds", "string", "Actors and resources"),
-    requiredString("from", "Origin place", visibleWhen("kind", ["transport"])),
-    requiredString("to", "Destination place", visibleWhen("kind", ["transport"])),
-    requiredString("mode", "Transport mode", visibleWhen("kind", ["transport"])),
+    requiredString("from", "Origin place", hiddenUnless("kind", ["transport"])),
+    requiredString("to", "Destination place", hiddenUnless("kind", ["transport"])),
+    requiredString("mode", "Transport mode", hiddenUnless("kind", ["transport"])),
     arrayField("effects", "butterflyEffect", "Effects (only on success)"),
   ],
 });
@@ -212,12 +212,12 @@ const intervention = defineType({
   type: "object",
   fields: [
     defineField({ name: "kind", title: "Intervention", type: "string", options: { list: [{ title: "Set event time", value: "setEventTime" }, { title: "Enable connection", value: "enableConnection" }] }, validation: rule => rule.required() }),
-    requiredString("eventId", "Event", visibleWhen("kind", ["setEventTime"])),
+    requiredString("eventId", "Event", hiddenUnless("kind", ["setEventTime"])),
     defineField({ name: "timeValues", title: "Allowed minutes", type: "array", hidden: ({ parent }) => parent?.kind !== "setEventTime", of: [{ type: "number" }], validation: (rule, context) => context?.hidden ? rule.skip() : rule.required().min(1) }),
-    integerField("minAvailableAt", "Minimum availability minute", 0, visibleWhen("kind", ["setEventTime"])),
-    requiredString("connectionId", "Existing connection", visibleWhen("kind", ["enableConnection"])),
+    integerField("minAvailableAt", "Minimum availability minute", 0, hiddenUnless("kind", ["setEventTime"])),
+    requiredString("connectionId", "Existing connection", hiddenUnless("kind", ["enableConnection"])),
     defineField({ name: "booleanValues", title: "Allowed enabled states", type: "array", hidden: ({ parent }) => parent?.kind !== "enableConnection", of: [{ type: "boolean" }], validation: (rule, context) => context?.hidden ? rule.skip() : rule.required().min(1) }),
-    requiredString("requiredMode", "Required transport mode", visibleWhen("kind", ["enableConnection"])),
+    requiredString("requiredMode", "Required transport mode", hiddenUnless("kind", ["enableConnection"])),
   ],
 });
 

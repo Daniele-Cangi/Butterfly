@@ -22,7 +22,7 @@ The runtime playhead is one shared ref. React updates the displayed clock at a t
 
 ## Phase 2 verification
 
-- `npm test`: 34 tests across 5 files exercise the retained scenario/review regressions, time-aware route sampling, fractional display, MomentFrame presence, recovery search and publication concurrency.
+- `npm test`: 38 tests across 6 files exercise the retained scenario/review regressions, time-aware route sampling, fractional display, MomentFrame presence, recovery search, Sanity authoring conditionals and publication concurrency.
 - `npm run test:browser`: 4 Playwright Chromium flows check original composition, bridge closure, missed moment and article claim, all MomentFrame versions, ferry wait, recovery preview and Apply, early departure, reset, fractional seek/playback, target-time lock, mobile reduced motion and Studio configuration.
 - Browser screenshots are stored under `screenshots/` and opened for visual review. These tests use the local fixture; Sanity live configuration is not asserted as successful.
 
@@ -32,6 +32,7 @@ The runtime playhead is one shared ref. React updates the displayed clock at a t
 - The Sanity schema offers explicit operators and conditional fields; Studio and publication both call the same validated adapter. Frozen publication re-simulates authoring data and guards the pointer with `ifRevisionId`; the local conflict test mutates the pointer after the read and confirms the new active ID is preserved.
 - Read-only CLI checks found the owner's existing `production` dataset and no Butterfly documents. Anonymous reads are enabled. `npm run seed:sanity` reached Content Lake but returned HTTP 403 (`create` permission required); the CLI user cannot seed or publish. The embedded Studio displays Sanity's “Connect this Studio to your project” state and requires a local-origin CORS entry. No dataset, content, CORS setting, or revision was created by this run. Live authoring and publication remain blocked by those project settings.
 - Browser screenshots and Playwright use the local fixture, with the app explicitly labeling `Local sample (live unavailable)` while the pointer is absent. No deployment or challenge submission has been performed.
+- The PR review's three schema/simulation findings are covered: conditional Studio fields are visible for matching event/requirement/intervention kinds, place entities omit `initialPlaceId`, and known semantic places remain feasible without optional display coordinates. The location test includes a completed route with no place/entity rendering coordinates.
 
 Do not log or commit `.env.local` or a service token. Do not expose a write route to anonymous clients. Keep StoryArtifact text as plain untrusted text. If extending to Markdown, sanitize it before rendering. Any future App SDK or Workflow use must follow current Sanity docs and retain the pure engine as the authority for outcomes.
 
