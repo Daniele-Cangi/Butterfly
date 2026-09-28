@@ -169,6 +169,6 @@ test("mobile reduced-motion MomentFrame and text controls remain usable", async 
 
 test("studio route exposes its configuration or Sanity connection state", async ({ page }) => {
   test.setTimeout(120000);
-  await page.goto("/studio", { waitUntil: "networkidle", timeout: 60000 });
-  await expect(page.locator("body")).toContainText(/Configure a dedicated Sanity project|Connect this Studio to your project|Butterfly world authoring/, { timeout: 30000 });
+  await page.goto("http://localhost:3000/studio", { waitUntil: "domcontentloaded", timeout: 60000 });
+  await expect(page.locator("body")).toContainText(/Configure a dedicated Sanity project|Connect this Studio to your project|Choose login provider|Butterfly world authoring/, { timeout: 30000 });
 });

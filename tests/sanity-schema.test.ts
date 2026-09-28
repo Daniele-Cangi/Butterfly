@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { sampleWorld } from "../fixtures/harbor";
+import { simulate } from "../src/engine/simulate";
+import { fromDraftDocument, toDraftDocument } from "../src/sanity/adapter";
 import { schemaTypes } from "../src/sanity/schema";
+import { validateWorld } from "../src/world/model";
 
 type FieldDefinition = {
   name: string;
@@ -54,5 +58,28 @@ describe("Sanity authoring conditionals", () => {
     if (!validation) throw new Error("Expected initialPlaceId validation");
     validation({ skip: () => { skipped = true; return "skipped"; }, required: () => "required" }, { hidden: true });
     expect(skipped).toBe(true);
+  });
+
+  it("allows the seeded pointer to have no active revision before first publication", () => {
+    expect(getField("butterflyWorldPointer", "activeRevisionId").validation).toBeUndefined();
+  });
+
+  it("strips stale hidden time-dependency fields when adapting an edited Sanity draft", () => {
+    const draft = structuredClone(toDraftDocument(sampleWorld)) as unknown as { events: Record<string, unknown>[] };
+    const photograph = draft.events.find(event => event.id === sampleWorld.featuredMoment.eventId)!;
+    photograph.afterEventId = sampleWorld.presentation.roles.deliveryEventId;
+    photograph.delay = 5;
+
+    const world = fromDraftDocument(draft);
+    const adapted = world.events.find(event => event.id === sampleWorld.featuredMoment.eventId)!;
+    expect(adapted).not.toHaveProperty("afterEventId");
+    expect(adapted).not.toHaveProperty("delay");
+    expect(simulate(world).events.find(event => event.id === sampleWorld.featuredMoment.eventId)?.status).toBe("possible");
+  });
+
+  it("rejects irrelevant dependency fields in direct world input", () => {
+    const world = structuredClone(sampleWorld);
+    world.events.find(event => event.id === world.featuredMoment.eventId)!.afterEventId = world.presentation.roles.deliveryEventId;
+    expect(() => validateWorld(world)).toThrow("Field afterEventId is not valid for fixed events.");
   });
 });

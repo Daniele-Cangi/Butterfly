@@ -15,7 +15,16 @@ export const requirementSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("entityAt"), entityId: id, placeId: id }),
   z.object({ type: z.literal("factEquals"), key: id, value: z.union([z.string(), z.number(), z.boolean()]) })
 ]);
-export const eventSchema = z.object({ id, worldId: id, kind: z.enum(["transport", "dependent", "fixed"]), name: z.string(), at: minute.optional(), afterEventId: id.optional(), delay: minute.optional(), requirements: z.array(requirementSchema), actorIds: z.array(id), from: id.optional(), to: id.optional(), mode: z.string().optional(), effects: z.array(z.object({ key: id, value: z.union([z.string(), z.number(), z.boolean()]) })) });
+export const eventSchema = z.object({ id, worldId: id, kind: z.enum(["transport", "dependent", "fixed"]), name: z.string(), at: minute.optional(), afterEventId: id.optional(), delay: minute.optional(), requirements: z.array(requirementSchema), actorIds: z.array(id), from: id.optional(), to: id.optional(), mode: z.string().optional(), effects: z.array(z.object({ key: id, value: z.union([z.string(), z.number(), z.boolean()]) })) }).superRefine((event, context) => {
+  const unusedFields = event.kind === "transport"
+    ? ["afterEventId", "delay"] as const
+    : event.kind === "dependent"
+      ? ["at", "from", "to", "mode"] as const
+      : ["afterEventId", "delay", "from", "to", "mode"] as const;
+  for (const field of unusedFields) {
+    if (event[field] !== undefined) context.addIssue({ code: "custom", path: [field], message: `Field ${field} is not valid for ${event.kind} events.` });
+  }
+});
 export const artifactSchema = z.object({ id, worldId: id, title: z.string(), body: z.string(), claims: z.array(z.object({ eventId: id, occurred: z.boolean() })) });
 export const interventionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("setEventTime"), eventId: id, values: z.array(minute), precondition: z.object({ minAvailableAt: minute }) }),

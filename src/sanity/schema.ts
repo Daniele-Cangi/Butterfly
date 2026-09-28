@@ -248,6 +248,6 @@ const draft = defineType({
 });
 
 const revision = defineType({ name: "butterflyWorldRevision", title: "Frozen Butterfly revision", type: "document", fields: [requiredString("worldId"), requiredString("revisionId"), defineField({ name: "snapshotJson", type: "text", readOnly: true }), defineField({ name: "createdAt", type: "datetime", readOnly: true })] });
-const pointer = defineType({ name: "butterflyWorldPointer", title: "Active Butterfly world", type: "document", fields: [requiredString("worldId"), requiredString("activeRevisionId")] });
+const pointer = defineType({ name: "butterflyWorldPointer", title: "Active Butterfly world", type: "document", fields: [requiredString("worldId"), defineField({ name: "activeRevisionId", title: "Active frozen revision ID (empty before first publication)", type: "string" })] });
 
 export const schemaTypes = [interval, point, visual, entity, segment, connection, fact, requirement, effect, event, claim, artifact, intervention, closure, compositionEntity, composition, moment, roles, presentation, draft, revision, pointer];
