@@ -138,10 +138,24 @@ describe("timed route sampling", () => {
     const checked = validateWorld(world);
     const result = simulate(checked);
 
-    expect(sampleEntity(checked, result, checked.presentation.roles.courierEntityId, 0)).toEqual({ status: "at-place", placeId: "depot" });
-    expect(sampleEntity(checked, result, checked.presentation.roles.courierEntityId, 30)).toEqual({ status: "at-place", placeId: "plaza" });
+    expect(sampleEntity(checked, result, checked.presentation.roles.courierEntityId, 0)).toMatchObject({ status: "at-place", placeId: "depot" });
+    expect(sampleEntity(checked, result, checked.presentation.roles.courierEntityId, 30)).toMatchObject({ status: "at-place", placeId: "plaza" });
     expect(getEvent(result, checked.featuredMoment.eventId).status).toBe("possible");
     expect(result.artifacts.find(artifact => artifact.id === checked.presentation.roles.storyArtifactId)?.compatibility).toBe("supported");
+  });
+
+  it("keeps the sampled route endpoint after arrival when the destination has no visual position", () => {
+    const world = structuredClone(sampleWorld);
+    const destination = world.entities.find(entity => entity.id === world.presentation.roles.plazaPlaceId)!;
+    delete destination.visual.position;
+    const checked = validateWorld(world);
+    const result = simulate(checked);
+    const delivery = getEvent(result, checked.presentation.roles.deliveryEventId);
+    const arrival = sampleRoute(delivery.route!, delivery.route!.arrive);
+
+    expect(arrival).toMatchObject({ status: "at-place", placeId: destination.id });
+    expect(sampleEntity(checked, result, checked.presentation.roles.courierEntityId, delivery.route!.arrive))
+      .toMatchObject({ status: "at-place", placeId: destination.id, position: arrival.position });
   });
 
   it("does not produce NaN for a positive-duration route with coincident geometry", () => {

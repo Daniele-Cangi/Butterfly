@@ -219,7 +219,7 @@ function resolveEntityPosition(world: World, results: ReadonlyMap<string, EventR
     if (result.status !== "possible" || !result.route) continue;
     if (minute < result.route.arrive) return { sample: sampleRoute(result.route, minute), causes: [event.id] };
     placeId = event.to;
-    position = world.entities.find(candidate => candidate.id === placeId)?.visual.position ?? position;
+    position = world.entities.find(candidate => candidate.id === placeId)?.visual.position ?? result.route.toPosition ?? position;
     lastMovement = event.id;
   }
   return placeId

@@ -71,4 +71,8 @@ The user's Studio CORS setup now lists `http://localhost:3000`; the browser veri
 
 Verification for this review follow-up: `npm run typecheck`, `npm run lint`, `npm test` (41 tests across 6 files), `npm run test:browser` (4 Chromium flows), and `npm run build` passed. `git diff --check` is run before commit.
 
+Codex's review of `02abf1f` found that a successful transport to a place without authored display coordinates could leave the actor at its prior coordinates after arrival. A regression removes the plaza coordinates and compares the actor sample at the exact arrival minute with the route endpoint. The previous implementation reproduced the snap-back; `sampleEntity` now uses the completed route's sampled endpoint before the last known position. The semantic-place test continues to assert place identity without requiring coordinates.
+
+Verification after this review finding: `npm run typecheck`, `npm run lint`, `npm test` (42 tests across 6 files), `npm run test:browser` (4 Chromium flows), `npm run build`, and `git diff --check` passed.
+
 The official Sanity guides consulted for this phase were [Content Lake perspectives](https://www.sanity.io/docs/content-lake/perspectives), [drafts](https://www.sanity.io/docs/content-lake/drafts), [Studio validation](https://www.sanity.io/docs/studio/validation), [CLI authentication](https://www.sanity.io/docs/apis-and-sdks/cli-authentication) and [transactions](https://www.sanity.io/docs/content-lake/transactions). Studio validation is client-side only, so the adapter and publishing path still validate independently. Sanity's transaction docs confirm that `ifRevisionId` causes a stale pointer write to fail with a conflict.
