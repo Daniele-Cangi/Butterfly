@@ -33,6 +33,7 @@ export const interventionSchema = z.discriminatedUnion("type", [
 export const worldSchema = z.object({
   id, baseRevision: id, title: z.string(), origin: z.string(), originMinute: minute, horizon: minute,
   networkComplete: z.boolean(), closureEditableConnectionIds: z.array(id), visitorClosure:z.object({connectionId:id,end:minute}),
+  visitorFerryOpening: z.object({ connectionId: id, values: z.array(minute).min(2) }).optional(),
   featuredMoment:z.object({eventId:id,placeId:id,arrangementEventId:id,photographerEntityId:id,subjectEntityIds:z.array(id).min(1),propEntityIds:z.array(id).min(1),composition:z.object({photographerPosition:point,subjectPositions:z.array(compositionEntity).min(1),propPositions:z.array(compositionEntity).min(1)})}),
   presentation:z.object({eventOrder:z.array(id),roles:z.object({deliveryEventId:id,setupEventId:id,ceremonyEventId:id,courierEntityId:id,vehicleEntityId:id,floralEntityId:id,depotPlaceId:id,plazaPlaceId:id,pierPlaceId:id,landingPlaceId:id,storyArtifactId:id})}),
   entities: z.array(entitySchema), connections: z.array(connectionSchema), facts: z.array(factSchema), events: z.array(eventSchema), artifacts: z.array(artifactSchema), interventions: z.array(interventionSchema)
@@ -42,7 +43,7 @@ export type Event = World["events"][number];
 export type Requirement = Event["requirements"][number];
 export type Connection = World["connections"][number];
 export type ConnectionSegment = NonNullable<Connection["segments"]>[number];
-export type Operation = { type: "setEventTime"; eventId: string; value: number } | { type: "enableConnection"; connectionId: string; value: boolean } | { type: "setConnectionEnd"; connectionId: string; value: number };
+export type Operation = { type: "setEventTime"; eventId: string; value: number } | { type: "enableConnection"; connectionId: string; value: boolean } | { type: "setConnectionEnd"; connectionId: string; value: number } | { type: "setConnectionStart"; connectionId: string; value: number };
 export type RealityPatch = { worldId: string; baseRevision: string; operations: Operation[] };
 
 export function validateWorld(input: unknown): World {
@@ -69,6 +70,15 @@ export function validateWorld(input: unknown): World {
   }
   for (const closureId of world.closureEditableConnectionIds) if (!connections.has(closureId)) throw new Error(`Missing editable closure ${closureId}`);
   if(!world.closureEditableConnectionIds.includes(world.visitorClosure.connectionId))throw new Error("Visitor closure is not editable");
+  if (world.visitorFerryOpening) {
+    const { connectionId, values } = world.visitorFerryOpening;
+    const connection = world.connections.find(item => item.id === connectionId);
+    const delivery = world.events.find(event => event.id === world.presentation.roles.deliveryEventId);
+    const deliveryMode = delivery?.kind === "transport" ? delivery.mode : undefined;
+    const activation = world.interventions.find((item): item is Extract<World["interventions"][number], { type: "enableConnection" }> => item.type === "enableConnection" && item.connectionId === connectionId);
+    if (!connection || !deliveryMode || connectionId === world.visitorClosure.connectionId || !connection.modes.includes(deliveryMode) || activation && activation.precondition.requiredMode !== deliveryMode || connection.windows.length !== 1 || !connection.segments?.some(segment => segment.role === "ferry")) throw new Error("Visitor ferry opening must reference a separate ferry connection compatible with the delivery mode, with one operating window");
+    if (new Set(values).size !== values.length || values.some(value => value >= connection.windows[0].end) || !values.includes(connection.windows[0].start)) throw new Error("Visitor ferry opening values must include the authored start and fit its window");
+  }
   if(!events.has(world.featuredMoment.eventId)||!places.has(world.featuredMoment.placeId))throw new Error("Featured moment reference missing");
   const featured = world.events.find(event => event.id === world.featuredMoment.eventId)!;
   const roles = world.presentation.roles;
@@ -121,6 +131,7 @@ export function applyPatch(world: World, patch: RealityPatch, locks: Operation[]
   for (const op of patch.operations) {
     if (locks.some(lock => lock.type === op.type && JSON.stringify(lock) !== JSON.stringify(op) && (("connectionId" in lock && "connectionId" in op && lock.connectionId === op.connectionId) || ("eventId" in lock && "eventId" in op && lock.eventId === op.eventId)))) throw new Error("Locked operation changed");
     if (op.type === "setConnectionEnd") { const c = copy.connections.find(x => x.id === op.connectionId); if (!c || !copy.closureEditableConnectionIds.includes(c.id)) throw new Error("Closure patch not allowed"); if (!Number.isInteger(op.value)||op.value <= c.windows[0].start||op.value>copy.horizon) throw new Error("Invalid closure time"); c.windows[0].end = op.value; }
+    else if (op.type === "setConnectionStart") { const c = copy.connections.find(x => x.id === op.connectionId); if (!c || copy.visitorFerryOpening?.connectionId !== c.id || !copy.visitorFerryOpening.values.includes(op.value) || op.value >= c.windows[0].end) throw new Error("Opening patch not allowed"); c.windows[0].start = op.value; }
     else if (op.type === "setEventTime") { const rule = copy.interventions.find((x): x is Extract<World["interventions"][number],{type:"setEventTime"}> => x.type === "setEventTime" && x.eventId === op.eventId); if (!rule || !rule.values.includes(op.value)) throw new Error("Event time intervention not allowed"); const e = copy.events.find(x => x.id === op.eventId)!; if (e.kind !== "transport" || op.value < rule.precondition.minAvailableAt) throw new Error("Departure precondition failed"); e.at = op.value; }
     else { const rule = copy.interventions.find((x): x is Extract<World["interventions"][number],{type:"enableConnection"}> => x.type === "enableConnection" && x.connectionId === op.connectionId); const c = copy.connections.find(x => x.id === op.connectionId); if (!rule || !c || !rule.values.includes(op.value) || !c.modes.includes(rule.precondition.requiredMode)) throw new Error("Connection intervention not allowed"); c.enabled = op.value; }
   }

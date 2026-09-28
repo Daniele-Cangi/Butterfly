@@ -222,6 +222,7 @@ const intervention = defineType({
 });
 
 const closure = defineType({ name: "butterflyVisitorClosure", title: "Visitor closure", type: "object", fields: [requiredString("connectionId"), integerField("end", "Closing minute", 1)] });
+const ferryOpening = defineType({ name: "butterflyVisitorFerryOpening", title: "Visitor ferry opening", type: "object", fields: [requiredString("connectionId"), defineField({ name: "values", title: "Allowed opening minutes", type: "array", of: [{ type: "number" }], validation: rule => rule.required().min(2) })] });
 const compositionEntity = defineType({ name: "butterflyCompositionEntity", title: "Framed actor or prop", type: "object", fields: [requiredString("entityId"), defineField({ name: "position", type: "butterflyPoint", validation: rule => rule.required() })] });
 const composition = defineType({ name: "butterflyMomentComposition", title: "Moment frame composition", type: "object", fields: [defineField({ name: "photographerPosition", type: "butterflyPoint", validation: rule => rule.required() }), arrayField("subjectPositions", "butterflyCompositionEntity"), arrayField("propPositions", "butterflyCompositionEntity")] });
 const moment = defineType({ name: "butterflyFeaturedMoment", title: "Featured moment and composition", type: "object", fields: [requiredString("eventId"), requiredString("placeId"), requiredString("arrangementEventId"), requiredString("photographerEntityId"), arrayField("subjectEntityIds", "string"), arrayField("propEntityIds", "string"), defineField({ name: "composition", type: "butterflyMomentComposition", validation: rule => rule.required() })] });
@@ -239,6 +240,7 @@ const draft = defineType({
     defineField({ name: "networkComplete", type: "boolean", validation: rule => rule.required() }),
     arrayField("closureEditableConnectionIds", "string", "Visitor-editable connections"),
     defineField({ name: "visitorClosure", type: "butterflyVisitorClosure", validation: rule => rule.required() }),
+    defineField({ name: "visitorFerryOpening", title: "Optional visitor ferry schedule", type: "butterflyVisitorFerryOpening" }),
     defineField({ name: "featuredMoment", type: "butterflyFeaturedMoment", validation: rule => rule.required() }),
     defineField({ name: "presentation", type: "butterflyPresentation", validation: rule => rule.required() }),
     arrayField("entities", "butterflyEntity"), arrayField("connections", "butterflyConnection"),
@@ -250,4 +252,4 @@ const draft = defineType({
 const revision = defineType({ name: "butterflyWorldRevision", title: "Frozen Butterfly revision", type: "document", fields: [requiredString("worldId"), requiredString("revisionId"), defineField({ name: "snapshotJson", type: "text", readOnly: true }), defineField({ name: "createdAt", type: "datetime", readOnly: true })] });
 const pointer = defineType({ name: "butterflyWorldPointer", title: "Active Butterfly world", type: "document", fields: [requiredString("worldId"), defineField({ name: "activeRevisionId", title: "Active frozen revision ID (empty before first publication)", type: "string" })] });
 
-export const schemaTypes = [interval, point, visual, entity, segment, connection, fact, requirement, effect, event, claim, artifact, intervention, closure, compositionEntity, composition, moment, roles, presentation, draft, revision, pointer];
+export const schemaTypes = [interval, point, visual, entity, segment, connection, fact, requirement, effect, event, claim, artifact, intervention, closure, ferryOpening, compositionEntity, composition, moment, roles, presentation, draft, revision, pointer];
