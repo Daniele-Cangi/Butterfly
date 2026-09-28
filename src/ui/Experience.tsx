@@ -4,8 +4,9 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { applyPatch, type Operation, type RealityPatch, type World } from "../world/model";
 import { compare, formatTime, getEvent, sampleEntity, sampleRoute, simulate } from "../engine/simulate";
-import { applyAlternative, keepThisMoment, type Goal, type SearchResult } from "../engine/search";
+import { applyAlternative, keepThisMoment, type Goal, type SearchOptions, type SearchResult } from "../engine/search";
 import { selectMomentEntityPresence } from "../scene/momentPresence";
+import { explainDay, explainIntervention } from "./story";
 
 const Diorama = dynamic(() => import("../scene/Diorama"), {
   ssr: false,
@@ -41,8 +42,8 @@ export default function Experience({ initialWorld, source, error }: { initialWor
   };
 
   const [patch, setPatch] = useState<RealityPatch>({ worldId: initialWorld.id, baseRevision: initialWorld.baseRevision, operations: [] });
-  const [time, setTime] = useState(20);
-  const timeRef = useRef(20);
+  const [time, setTime] = useState(goal.time);
+  const timeRef = useRef(goal.time);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [compareOn, setCompareOn] = useState(false);
@@ -55,6 +56,9 @@ export default function Experience({ initialWorld, source, error }: { initialWor
   const [reducedMotion, setReducedMotion] = useState(false);
   const [sceneReady, setSceneReady] = useState(false);
   const [newVersion, setNewVersion] = useState(false);
+  const [keepDeparture, setKeepDeparture] = useState(false);
+  const [showEvidence, setShowEvidence] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -149,6 +153,12 @@ export default function Experience({ initialWorld, source, error }: { initialWor
   const variantWorld = useMemo(() => applyPatch(initialWorld, patch), [initialWorld, patch]);
   const variantResult = useMemo(() => simulate(variantWorld), [variantWorld]);
   const closureLocked = patch.operations.some(operation => operation.type === "setConnectionEnd");
+  const originalDeparture = initialWorld.events.find(event => event.id === roles.deliveryEventId)?.at;
+  const ferryControl = initialWorld.visitorFerryOpening;
+  const ferryOpening = ferryControl ? variantWorld.connections.find(connection => connection.id === ferryControl.connectionId)?.windows[0].start : undefined;
+  const searchOptions: SearchOptions = keepDeparture && originalDeparture !== undefined
+    ? { constraints: { departureNotBefore: { eventId: roles.deliveryEventId, minute: originalDeparture } } }
+    : {};
   const chosen = search?.alternatives.find(alternative => alternative.id === previewId);
 
   const previewWorld = useMemo(() => chosen
@@ -178,6 +188,7 @@ export default function Experience({ initialWorld, source, error }: { initialWor
 
   const activeDelivery = getEvent(activeResult, roles.deliveryEventId);
   const activeCeremony = getEvent(activeResult, roles.ceremonyEventId);
+  const departureMinute = activeWorld.events.find(event => event.id === roles.deliveryEventId)?.at ?? 0;
   const artifact = activeResult.artifacts.find(item => item.id === roles.storyArtifactId)!;
   const selectedEvent = activeResult.events.find(event => event.id === selected);
   const selectedConnection = activeWorld.connections.find(connection => connection.id === selected);
@@ -187,6 +198,7 @@ export default function Experience({ initialWorld, source, error }: { initialWor
   const selectEvent = (eventId: string) => {
     const row = activeDifferences.find(item => item.id === eventId);
     setSelected(eventId);
+    setShowEvidence(true);
     seek(eventId === goal.eventId ? goal.time : row?.variant.time ?? timeRef.current);
   };
 
@@ -225,38 +237,55 @@ export default function Experience({ initialWorld, source, error }: { initialWor
 
   const changeClosure = () => {
     const operations: Operation[] = closureLocked
-      ? []
-      : [{ type: "setConnectionEnd", connectionId: initialWorld.visitorClosure.connectionId, value: initialWorld.visitorClosure.end }];
-    setPatch({ worldId: initialWorld.id, baseRevision: initialWorld.baseRevision, operations });
+      ? patch.operations.filter(operation => operation.type !== "setConnectionEnd")
+      : [...patch.operations, { type: "setConnectionEnd", connectionId: initialWorld.visitorClosure.connectionId, value: initialWorld.visitorClosure.end }];
+    const nextPatch = { worldId: initialWorld.id, baseRevision: initialWorld.baseRevision, operations };
+    setPatch(nextPatch);
     setSearch(null);
     setPreviewId(null);
     setSceneVersion("variant");
     setMomentFrame(false);
+    setShowEvidence(false);
     setSelected(initialWorld.visitorClosure.connectionId);
     setPlaying(false);
-    seek(20, true);
+    seek(goal.time, true);
+    setAnnouncement(closureLocked ? "Original bridge schedule restored." : `Bridge now closes at ${displayTime(initialWorld.visitorClosure.end)}. The chosen composition is missed.`);
   };
 
-  const keepMoment = () => {
-    const nextSearch = keepThisMoment(initialWorld, patch, goal);
-    setSearch(nextSearch);
-    setPreviewId(nextSearch.alternatives[0]?.id ?? null);
-    setSceneVersion(nextSearch.alternatives.length ? "preview" : "variant");
+  const viewMoment = (version: "original" | "variant") => {
+    setSceneVersion(version);
     setSelected(goal.eventId);
     setPlaying(false);
     setMomentFrame(true);
     seek(goal.time, true);
+    setAnnouncement(`Viewing ${version === "original" ? "the original" : "your variant"} at ${displayTime(goal.time)}.`);
+  };
+
+  const findAlternatives = () => {
+    const nextSearch = keepThisMoment(initialWorld, patch, goal, searchOptions);
+    setSearch(nextSearch);
+    setPreviewId(null);
+    setSceneVersion("variant");
+    setMomentFrame(true);
+    setSelected(goal.eventId);
+    setShowEvidence(false);
+    setPlaying(false);
+    seek(goal.time, true);
+    setAnnouncement(nextSearch.status === "found" ? `${nextSearch.alternatives.length} distinct alternatives found. None has been applied.` : nextSearch.status === "exhausted" ? "No alternative preserves this composition in the explored domain." : `Search result: ${nextSearch.status}.`);
   };
 
   const chooseAlternative = (alternativeId: string) => {
     setPreviewId(alternativeId);
     setSceneVersion("preview");
     seek(goal.time, true);
+    setAnnouncement("Recovery preview selected. Your variant has not changed.");
   };
 
   const applyChosen = () => {
     if (!chosen) return;
-    const nextPatch = applyAlternative(initialWorld, patch, goal, chosen);
+    let nextPatch: RealityPatch;
+    try { nextPatch = applyAlternative(initialWorld, patch, goal, chosen, searchOptions); }
+    catch { setSearch(null); setPreviewId(null); setSceneVersion("variant"); setAnnouncement("This preview is stale. Find alternatives again."); return; }
     setPatch(nextPatch);
     setSearch(null);
     setPreviewId(null);
@@ -264,6 +293,24 @@ export default function Experience({ initialWorld, source, error }: { initialWor
     setSelected(goal.eventId);
     setPlaying(false);
     seek(goal.time, true);
+    setAnnouncement(`Solution applied to your variant. The chosen composition is possible at ${displayTime(goal.time)}; the bridge closure remains in place.`);
+  };
+
+  const changeFerryOpening = (value: number) => {
+    if (!ferryControl) return;
+    const baseStart = initialWorld.connections.find(connection => connection.id === ferryControl.connectionId)?.windows[0].start;
+    const operations: Operation[] = patch.operations.filter(operation => !(operation.type === "setConnectionStart" && operation.connectionId === ferryControl.connectionId));
+    if (value !== baseStart) operations.push({ type: "setConnectionStart", connectionId: ferryControl.connectionId, value });
+    setPatch({ ...patch, operations });
+    setSearch(null); setPreviewId(null); setSceneVersion("variant");
+    setAnnouncement(`Ferry opening set to ${displayTime(value)}. The day's outcomes have been recalculated.`);
+  };
+
+  const changeDepartureConstraint = (checked: boolean) => {
+    setKeepDeparture(checked);
+    if (checked && originalDeparture !== undefined) setPatch(current => ({ ...current, operations: current.operations.filter(operation => !(operation.type === "setEventTime" && operation.eventId === roles.deliveryEventId && operation.value < originalDeparture)) }));
+    setSearch(null); setPreviewId(null); setSceneVersion("variant");
+    setAnnouncement(checked ? `Recovery must keep the courier's departure at or after ${displayTime(originalDeparture ?? null)}.` : "Earlier departure is allowed again.");
   };
 
   const reset = () => {
@@ -272,9 +319,12 @@ export default function Experience({ initialWorld, source, error }: { initialWor
     setPreviewId(null);
     setSceneVersion("variant");
     setMomentFrame(false);
+    setKeepDeparture(false);
+    setShowEvidence(false);
     setSelected(initialWorld.visitorClosure.connectionId);
     setPlaying(false);
-    seek(20, true);
+    seek(goal.time, true);
+    setAnnouncement("Original day restored.");
   };
 
   const claimMessage = artifact.compatibility === "supported"
@@ -301,11 +351,12 @@ export default function Experience({ initialWorld, source, error }: { initialWor
         </div>
       </header>
 
-      {error && <div className="error" role="alert">Live Sanity connection error: {error}</div>}
+      {error && <details className="connection-details"><summary>Live connection details</summary><p>Live Sanity connection error: {error}</p></details>}
       {newVersion && <div className="error" role="status">A new world revision is available. Your variant stays anchored to this snapshot.</div>}
+      <div className="sr-only" role="status" aria-live="polite">{announcement}</div>
 
       <section className="workspace">
-        <div className={"scene-shell" + (momentFrame ? " frame-mode" : "")} data-version={sceneVersion} data-state={activeTarget.status}>
+        <div className={"scene-shell" + (momentFrame ? " frame-mode" : "") + (webgl === false ? " text-scene" : "")} data-version={sceneVersion} data-state={activeTarget.status}>
           <div className="scene-meta">
             <span>WORLD / {initialWorld.title}</span>
             <div className="scene-time"><small>{momentFrame ? "TARGET TIME" : "WORLD TIME"}</small><strong data-testid="scene-clock">{displayTime(effectiveTime)}</strong></div>
@@ -330,13 +381,13 @@ export default function Experience({ initialWorld, source, error }: { initialWor
               momentFrame={momentFrame}
               reducedMotion={reducedMotion}
               selected={selected}
-              onSelect={setSelected}
+              onSelect={id => { setSelected(id); setShowEvidence(true); }}
               onSceneReady={() => setSceneReady(true)}
             />
           )}
           {sceneReady && webgl && <span className="scene-ready" data-testid="scene-ready">Neighborhood rendered</span>}
-          <div className="scene-version" aria-live="polite"><i aria-hidden="true" />{activeLabel}{momentFrame ? " · MomentFrame" : ""}</div>
-          <div className="scene-presence" aria-live="polite">
+          <div className="scene-version"><i aria-hidden="true" />{activeLabel}{momentFrame ? " · MomentFrame" : ""}</div>
+          <div className="scene-presence">
             {courierSample.status === "waiting" ? "Courier waiting at " + (courierPlace ?? "a scheduled stop") :
               courierSample.status === "moving" ? "Courier moving on the " + (courierSample.role ?? "road") :
                 courierSample.status === "unknown" ? "Courier position indeterminate" :
@@ -357,9 +408,9 @@ export default function Experience({ initialWorld, source, error }: { initialWor
                 <div className="plate-time"><span>TARGET</span><strong>{displayTime(goal.time)}</strong></div>
               </div>
               <div className="version-tabs" aria-label="Observed version">
-                <button aria-label="Original" aria-pressed={sceneVersion === "original"} className={sceneVersion === "original" ? "selected" : ""} onClick={() => setSceneVersion("original")}><span aria-hidden="true">01</span>Original</button>
-                <button aria-label="Your variant" aria-pressed={sceneVersion === "variant"} className={sceneVersion === "variant" ? "selected" : ""} onClick={() => setSceneVersion("variant")}><span aria-hidden="true">02</span>Your variant</button>
-                {previewWorld && <button aria-label="Recovery preview" aria-pressed={sceneVersion === "preview"} className={sceneVersion === "preview" ? "selected" : ""} onClick={() => setSceneVersion("preview")}><span aria-hidden="true">03</span>Recovery preview</button>}
+                <button aria-label="Original" aria-pressed={sceneVersion === "original"} className={sceneVersion === "original" ? "selected" : ""} onClick={() => { setSceneVersion("original"); setAnnouncement("Showing the original composition at " + displayTime(goal.time)); }}><span aria-hidden="true">01</span>Original</button>
+                <button aria-label="Your variant" aria-pressed={sceneVersion === "variant"} className={sceneVersion === "variant" ? "selected" : ""} onClick={() => { setSceneVersion("variant"); setAnnouncement("Showing your variant at " + displayTime(goal.time)); }}><span aria-hidden="true">02</span>Your variant</button>
+                {previewWorld && <button aria-label="Recovery preview" aria-pressed={sceneVersion === "preview"} className={sceneVersion === "preview" ? "selected" : ""} onClick={() => { setSceneVersion("preview"); setAnnouncement("Showing the recovery preview at " + displayTime(goal.time)); }}><span aria-hidden="true">03</span>Recovery preview</button>}
               </div>
               <div className="plate-composition"><span>COMPOSITION AT {displayTime(goal.time)}</span><small className="moment-presence" aria-label="Moment participant presence">{momentPresenceSummary}</small></div>
               <div className="plate-footer"><span title={initialWorld.baseRevision}>REV {initialWorld.baseRevision}</span><button className="frame-close" aria-label="Return to neighborhood" onClick={() => setMomentFrame(false)}>Return to neighborhood ↗</button></div>
@@ -368,10 +419,12 @@ export default function Experience({ initialWorld, source, error }: { initialWor
         </div>
 
         <aside className="side">
-          <div className="side-intro">
-            <div className="eyebrow">FIELD NOTE / 01</div>
+          <div className="side-intro" data-changed={closureLocked}>
+            <div className="eyebrow">AN ALTERNATIVE-STORY LABORATORY</div>
             <h1>A crossing changes an afternoon.</h1>
-            <p className="intro">Move the bridge closure earlier. Follow the delivery, then preserve this photograph without reopening the bridge.</p>
+            <p className="intro">{closureLocked ? "The crossing changed. Follow what happened to the chosen composition." : "Change one condition, see the consequences, and find a way to preserve what matters."}</p>
+            <p className="case-note">This composition is planned for {displayTime(goal.time)}. Close the bridge early and its arrangement arrives too late. Can you keep the same people, place, time and flowers without reopening the bridge?</p>
+            <p className="time-note">The clock is a viewpoint into the day. You can still change an earlier departure while observing {displayTime(effectiveTime)}.</p>
           </div>
           <div className="condition-card" data-state={closureLocked ? "changed" : "original"}>
             <div className="condition-title"><span>CHANGE THE CONDITION</span><strong>Bridge closing time</strong></div>
@@ -380,6 +433,12 @@ export default function Experience({ initialWorld, source, error }: { initialWor
               {closureLocked ? "Restore bridge schedule" : "Close bridge at " + displayTime(initialWorld.visitorClosure.end)}
             </button>
             {closureLocked && <span className="lock">✳ Bridge closure locked during recovery</span>}
+          </div>
+
+          <div className="story-explanation" data-state={activeTarget.status}>
+            <span className="section-label">{closureLocked ? "WHAT CHANGED" : "THE ORIGINAL PLAN"}</span>
+            <p>{explainDay(activeWorld, activeResult)}</p>
+            {closureLocked && <button className="quiet" onClick={() => { setShowEvidence(value => !value); setSelected(goal.eventId); }} aria-expanded={showEvidence}>{showEvidence ? "Hide route and causes" : "Show route and causes"}</button>}
           </div>
 
           <div className="event-list">
@@ -395,12 +454,19 @@ export default function Experience({ initialWorld, source, error }: { initialWor
                 </button>
               );
             })}
-            <button className="gazette-row" onClick={() => setSelected(roles.storyArtifactId)} aria-label={artifact.title + " " + artifact.compatibility}>
+            <button className="gazette-row" onClick={() => { setSelected(roles.storyArtifactId); setShowEvidence(true); }} aria-label={artifact.title + " " + artifact.compatibility}>
               {artifact.title}<strong>{artifact.compatibility}</strong>
             </button>
           </div>
 
-          <div className="inspector" aria-live="polite">
+          <details className="object-index">
+            <summary>Explore people, places, objects and routes</summary>
+            <div>{activeWorld.entities.map(entity => <button key={entity.id} onClick={() => { setSelected(entity.id); setShowEvidence(true); }}>{entity.name}</button>)}
+              {activeWorld.connections.map(connection => <button key={connection.id} onClick={() => { setSelected(connection.id); setShowEvidence(true); }}>{connection.label ?? connection.id}</button>)}
+            </div>
+          </details>
+
+          {showEvidence && <div className="inspector">
             <div className="section-label">CAUSES & EVIDENCE <span>{activeLabel.toUpperCase()}</span></div>
             <div className="inspector-heading">
               <h2>{selectedEvent?.name ?? selectedConnection?.label ?? selectedConnection?.id ?? selectedEntity?.name ?? (selected === roles.storyArtifactId ? artifact.title : "Select a place or moment")}</h2>
@@ -423,7 +489,7 @@ export default function Experience({ initialWorld, source, error }: { initialWor
               : selected === roles.storyArtifactId ? <p>{claimMessage} “{activeWorld.artifacts.find(item => item.id === roles.storyArtifactId)!.body}”</p>
                 : selectedEntity ? <p>{selectedEntity.name}. {selectedEntity.initialPlaceId ? "Starts at " + (activeWorld.entities.find(item => item.id === selectedEntity.initialPlaceId)?.name ?? selectedEntity.initialPlaceId) + "." : "Part of this neighborhood."}</p>
                   : <p>Choose an event, person, place or connection in the town to inspect its requirements and causes.</p>}
-          </div>
+          </div>}
         </aside>
       </section>
 
@@ -433,7 +499,7 @@ export default function Experience({ initialWorld, source, error }: { initialWor
           <label className="timeline-clock" htmlFor="time-slider">{momentFrame ? "FRAME LOCKED" : "WORLD TIME"} <strong data-testid="timeline-clock">{displayTime(effectiveTime)}</strong></label>
           <div className="timeline-track">
             <div className="timeline-ticks" aria-hidden="true" />
-            <input id="time-slider" aria-label="Seek scenario time" type="range" min="0" max={initialWorld.horizon} step="0.05" value={effectiveTime} disabled={momentFrame} onChange={event => seek(Number(event.target.value))} />
+          <input id="time-slider" aria-label="Seek scenario time" aria-valuetext={displayTime(effectiveTime)} type="range" min="0" max={initialWorld.horizon} step="0.05" value={effectiveTime} disabled={momentFrame} onChange={event => seek(Number(event.target.value))} />
             <div className="timeline-markers" aria-hidden="true">
               {eventRows.filter(event => event.time !== null).map(event => <i key={event.id} data-state={event.status} data-selected={selected === event.id} style={{ left: Math.max(0, Math.min(100, (event.time! / initialWorld.horizon) * 100)) + "%" }} />)}
             </div>
@@ -445,43 +511,59 @@ export default function Experience({ initialWorld, source, error }: { initialWor
             </select>
           </label>
           <button className="quiet" onClick={reset}>Reset variant</button>
+          <div className="time-jumps" aria-label="Jump to an event time">
+            <span>GO TO</span>
+            <button disabled={momentFrame} onClick={() => seek(departureMinute)}>Departure {displayTime(departureMinute)}</button>
+            {activeDelivery.time !== null && <button disabled={momentFrame} onClick={() => seek(activeDelivery.time!)}>Arrival {displayTime(activeDelivery.time)}</button>}
+            <button disabled={momentFrame} onClick={() => seek(goal.time)}>Chosen moment {displayTime(goal.time)}</button>
+          </div>
         </div>
 
         <div className="moment" data-state={activeTarget.status}>
           <div className="moment-stamp"><span>TARGET</span><strong>{displayTime(goal.time)}</strong></div>
           <div className="moment-copy">
-            <span className="eyebrow">THE MOMENT TO KEEP</span>
+            <span className="eyebrow">KEEP THIS MOMENT / THE CHOSEN COMPOSITION</span>
             <h2>{activeTarget.status === "possible" ? sceneVersion === "preview" ? "Recovery preview keeps the photograph possible at " + displayTime(goal.time) + "." : effectiveTime >= goal.time ? "The photograph happened at " + displayTime(goal.time) + "." : "The photograph can happen." : activeTarget.status === "unknown" ? "The photograph remains indeterminate." : effectiveTime >= goal.time ? "The photograph is now a missed moment." : "The photograph cannot happen as planned."}</h2>
             <p>{displayTime(goal.time)} · {initialWorld.entities.find(entity => entity.id === goal.placeId)?.name} · {initialWorld.featuredMoment.subjectEntityIds.map(id => initialWorld.entities.find(entity => entity.id === id)?.name ?? id).join(", ")} · {initialWorld.entities.find(entity => entity.id === initialWorld.featuredMoment.propEntityIds[0])?.name}</p>
+            <p className="moment-definition">The goal is this arrangement with these people at this place and time, rather than any photograph later in the day.</p>
             {activeTarget.status === "impossible" && <small>The original composition remains available in MomentFrame. Its flowers do not appear in {activeLabel.toLowerCase()} before delivery and setup.</small>}
             {activeTarget.status === "unknown" && <small>Missing or incomplete world data cannot establish whether this composition is possible.</small>}
           </div>
-          <button className="keep" onClick={keepMoment}>Keep this moment <span aria-hidden="true">↗</span></button>
+          <div className="moment-actions">
+            <button className="quiet" onClick={() => viewMoment("original")}>View original moment</button>
+            <button className="keep" onClick={() => viewMoment("variant")}>Keep this moment <span aria-hidden="true">↗</span></button>
+            {closureLocked && <button className="action secondary" onClick={findAlternatives}>Find alternatives</button>}
+          </div>
         </div>
 
+        {closureLocked && <section className="constraints" aria-label="Keep also">
+          <div><span className="eyebrow">KEEP ALSO / CHOOSE WHAT CANNOT CHANGE</span><p>The clock is a viewpoint, so an earlier departure can still change this day. These limits narrow the recovery search without moving the chosen photograph.</p></div>
+          {originalDeparture !== undefined && <label className="departure-constraint"><input type="checkbox" checked={keepDeparture} onChange={event => changeDepartureConstraint(event.target.checked)} /> Do not depart before {displayTime(originalDeparture)}</label>}
+          {ferryControl && <label className="ferry-constraint">Ferry starts operating at <select value={ferryOpening} onChange={event => changeFerryOpening(Number(event.target.value))}>{ferryControl.values.map(value => <option key={value} value={value}>{displayTime(value)}</option>)}</select></label>}
+        </section>}
+
         {search && (
-          <div className="alternatives" aria-live="polite">
+          <div className="alternatives">
             <div className="alternative-heading">
               <div><span className="eyebrow">VERIFIED IN THE ENGINE</span><h2>{search.status === "found" ? "Ways to keep the moment" : search.status === "limit-reached" && search.alternatives.length ? "Verified options from a partial search" : search.status === "already-satisfied" ? "Already possible" : search.status === "indeterminate" ? "Result indeterminate" : "No alternative in this domain"}</h2></div>
               <button className="quiet" onClick={() => { setSearch(null); setPreviewId(null); setSceneVersion("variant"); }}>Close</button>
             </div>
-            <p className="method">
-              Search checked {search.examined} of {search.domainSize} candidates, with at most {search.maxInterventions} interventions and {search.maxCandidates} candidates. It ranks fewer changes first, then smaller time shifts.
-              {search.status === "limit-reached" && " The limit was reached; this does not prove impossibility."}
-              {search.status === "exhausted" && " The finite configured domain was fully explored."}
-              {search.status === "indeterminate" && " Incomplete world data leaves the result unsettled."}
-            </p>
+            <p className="search-outcome">{search.status === "found" ? `${search.alternatives.length} distinct ways preserve the chosen composition at ${displayTime(goal.time)}. Choose one to preview; your variant has not changed.` : search.status === "exhausted" ? `With these limits, none of the ${search.domainSize} allowed candidate changes preserves the composition at ${displayTime(goal.time)}. You can allow an earlier departure or change the ferry opening. This conclusion covers only the configured domain.` : search.status === "already-satisfied" ? "Your current variant already preserves the chosen composition." : search.status === "limit-reached" ? "The candidate limit was reached. The remaining domain has not been checked." : "Incomplete world data leaves the result unsettled."}</p>
+            <details className="search-method"><summary>How the search was checked</summary><p>Checked {search.examined} of {search.domainSize} candidates, with at most {search.maxInterventions} interventions and a limit of {search.maxCandidates} candidates. Fewer changes rank first, then smaller time shifts. {search.groupedCount} redundant combinations were omitted from the main cards because their extra operations did not change event outcomes, route IDs or article compatibility. Separate interventions remain separate cards. {search.status === "limit-reached" && "A reached limit does not prove impossibility."}</p></details>
             <div className="cards">
               {search.alternatives.map((alternative, index) => {
                 const previewDelivery = getEvent(alternative.result, roles.deliveryEventId);
                 const previewSetup = getEvent(alternative.result, roles.setupEventId);
                 const changes = alternative.operations.map(operation => operation.type === "setEventTime"
                   ? "Depart at " + displayTime(operation.value)
-                  : (operation.value ? "Activate " : "Deactivate ") + (initialWorld.connections.find(connection => connection.id === operation.connectionId)?.label ?? operation.connectionId));
+                  : operation.type === "enableConnection" ? (operation.value ? "Activate " : "Deactivate ") + (initialWorld.connections.find(connection => connection.id === operation.connectionId)?.label ?? operation.connectionId) : "Open route at " + displayTime(operation.value));
+                const title = alternative.operations.map(operation => operation.type === "setEventTime" ? "Leave earlier" : operation.type === "enableConnection" ? "Use " + (initialWorld.connections.find(connection => connection.id === operation.connectionId)?.label ?? operation.connectionId) : "Adjust opening").join(" + ");
                 return (
                   <button key={alternative.id} className={"alternative " + (previewId === alternative.id ? "chosen" : "")} onClick={() => chooseAlternative(alternative.id)} aria-label={changes.join(" and ")} aria-pressed={previewId === alternative.id}>
                     <span className="alternative-index">INTERVENTION / {String(index + 1).padStart(2, "0")}</span>
-                    <strong>{changes.join(" + ")}</strong>
+                    <strong>{title}</strong>
+                    <span className="alternative-operation">{changes.join(" + ")}</span>
+                    <span className="alternative-story">{explainIntervention(variantWorld, alternative.result, alternative.operations)}</span>
                     <small>Delivery {displayTime(previewDelivery.time)} · Setup {displayTime(previewSetup.time)} · Photograph {getEvent(alternative.result, goal.eventId).status}</small>
                     <span className="alternative-foot"><span>{alternative.operations.length} {alternative.operations.length === 1 ? "CHANGE" : "CHANGES"}</span><span>✓ VERIFIED AT {displayTime(goal.time)}</span></span>
                   </button>
@@ -490,13 +572,13 @@ export default function Experience({ initialWorld, source, error }: { initialWor
             </div>
             {chosen && previewWorld && previewResult && (
               <div className="apply-row">
-                <p>Recovery preview is read-only. The bridge closure remains locked. Photo at {displayTime(goal.time)}: {getEvent(previewResult, goal.eventId).status}.</p>
-                <button className="action" onClick={applyChosen}>Apply to my variant</button>
+                <p>This is a preview. Applying it changes your variant only; the bridge remains closed. Chosen composition at {displayTime(goal.time)}: {getEvent(previewResult, goal.eventId).status}.</p>
+                <button className="action" onClick={applyChosen}>Use this solution</button>
               </div>
             )}
           </div>
         )}
-        <div className="sr-summary" aria-live="polite">
+        <div className="sr-summary">
           {activeLabel}: delivery {playbackLabel(getEvent(activeResult, roles.deliveryEventId), "on schedule")}, setup {playbackLabel(getEvent(activeResult, roles.setupEventId), "on schedule")}, photograph {playbackLabel(getEvent(activeResult, goal.eventId), "on schedule")}, ceremony {playbackLabel(getEvent(activeResult, roles.ceremonyEventId), "on schedule")}. Article claim {activeResult.artifacts.find(item => item.id === roles.storyArtifactId)?.compatibility ?? "unknown"}.
         </div>
       </section>

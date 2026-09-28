@@ -29,6 +29,7 @@ export function toDraftDocument(world: World) {
     networkComplete: world.networkComplete,
     closureEditableConnectionIds: world.closureEditableConnectionIds,
     visitorClosure: { ...world.visitorClosure, _type: "butterflyVisitorClosure" },
+    visitorFerryOpening: world.visitorFerryOpening ? { ...world.visitorFerryOpening, _type: "butterflyVisitorFerryOpening" } : undefined,
     featuredMoment: {
       ...world.featuredMoment,
       _type: "butterflyFeaturedMoment",
@@ -89,6 +90,7 @@ export function fromDraftDocument(raw: unknown): World {
     networkComplete: draft.networkComplete,
     closureEditableConnectionIds: draft.closureEditableConnectionIds,
     visitorClosure: draft.visitorClosure,
+    visitorFerryOpening: draft.visitorFerryOpening,
     featuredMoment: {
       ...record(draft.featuredMoment),
       composition: {
