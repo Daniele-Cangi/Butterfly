@@ -2,34 +2,73 @@ import { validateWorld, type Connection, type Event, type Requirement, type Worl
 
 export type Feasibility = "possible" | "impossible" | "unknown";
 export type Reason = { requirement: Requirement | { type: "route" }; observed: string; status: Feasibility; involved: string[]; causes: string[] };
-export type Route = { connectionIds: string[]; depart: number; arrive: number; path: [number, number][] };
+export type TravelRole = "road" | "bridge" | "ferry";
+export type TimedGeometry = { role: TravelRole; start: number; end: number; path: [number, number][] };
+export type RouteStep =
+  | { kind: "wait"; placeId: string; start: number; end: number; position: [number, number] }
+  | { kind: "movement"; connectionId: string; from: string; to: string; start: number; end: number; geometry: TimedGeometry[] };
+export type Route = { from: string; to: string; fromPosition: [number, number]; toPosition: [number, number]; connectionIds: string[]; plannedDepart: number; depart: number; arrive: number; path: [number, number][]; itinerary: RouteStep[] };
 export type EventResult = { id: string; name: string; time: number | null; status: Feasibility; route?: Route; reasons: Reason[] };
 export type ArtifactResult = { id: string; title: string; compatibility: "supported" | "unsupported" | "unknown"; causes: string[] };
 export type Simulation = { worldId: string; revision: string; events: EventResult[]; artifacts: ArtifactResult[]; derivedFacts: {key:string;value:string|number|boolean;source:"derived";eventId:string;interval:{start:number;end:number}}[] };
+export type PositionSample = { status: "at-place" | "waiting" | "moving" | "unknown"; position?: [number, number]; placeId?: string; connectionId?: string; role?: TravelRole };
 
 const ordered = <T extends { id: string }>(items: T[]) => [...items].sort((a,b) => a.id.localeCompare(b.id));
+const geometryOf = (connection: Connection) => connection.segments ?? [{ role: "road" as const, duration: connection.duration, path: connection.path }];
+const concatenate = (segments: {path:[number,number][]}[]) => segments.flatMap((segment, index) => index ? segment.path.slice(1) : segment.path);
 
 function traverse(connection: Connection, earliest: number): { depart: number; arrive: number } | undefined {
   if (!connection.enabled) return;
-  const options = connection.windows.map(w => ({ depart: Math.max(earliest, w.start), arrive: Math.max(earliest, w.start) + connection.duration })).filter((t,i) => t.depart < connection.windows[i].end && t.arrive <= connection.windows[i].end);
-  // The end is exclusive for starting, inclusive for completing a traversal.
+  const options = connection.windows.map(window => ({ depart: Math.max(earliest, window.start), arrive: Math.max(earliest, window.start) + connection.duration }))
+    .filter((travel, index) => travel.depart < connection.windows[index].end && travel.arrive <= connection.windows[index].end);
+  // A traversal may finish exactly at the inclusive availability deadline.
   return options.sort((a,b) => a.arrive - b.arrive || a.depart - b.depart)[0];
 }
 
 export function findRoute(world: World, from: string, to: string, mode: string, start: number): Route | undefined {
-  const best = new Map<string, { time: number; depart: number; ids: string[]; path: [number,number][] }>([[from, { time: start, depart: start, ids: [], path: [] }]]);
+  type State = { time: number; depart: number; ids: string[]; path: [number,number][]; itinerary: RouteStep[] };
+  type Place = typeof world.entities[number];
+  const origin = world.entities.find((entity: Place) => entity.id === from)?.visual.position;
+  const initial: State = { time: start, depart: start, ids: [], path: [], itinerary: [] };
+  const best = new Map<string, State>([[from, initial]]);
   const queue = [from];
   while (queue.length) {
     queue.sort((a,b) => (best.get(a)!.time - best.get(b)!.time) || a.localeCompare(b));
     const current = queue.shift()!, state = best.get(current)!;
-    for (const c of ordered(world.connections).filter(x => x.from === current && x.modes.includes(mode))) {
-      const t = traverse(c, state.time); if (!t) continue;
-      const ids = [...state.ids, c.id], path = [...state.path, ...c.path];
-      const previous = best.get(c.to);
-      if (!previous || t.arrive < previous.time || (t.arrive === previous.time && ids.join("/") < previous.ids.join("/"))) { best.set(c.to, { time: t.arrive, depart: state.ids.length ? state.depart : t.depart, ids, path }); if (!queue.includes(c.to)) queue.push(c.to); }
+    if (current === to) break;
+    for (const connection of ordered(world.connections).filter(item => item.from === current && item.modes.includes(mode))) {
+      const timing = traverse(connection, state.time);
+      if (!timing) continue;
+      const connectionGeometry = geometryOf(connection);
+      const nextIds = [...state.ids, connection.id];
+      const geometryPath = concatenate(connectionGeometry);
+      const nextPath = [...state.path, ...geometryPath.slice(state.path.length ? 1 : 0)];
+      const nextSteps: RouteStep[] = [...state.itinerary];
+      if (timing.depart > state.time) {
+        const position = world.entities.find(entity => entity.id === current)?.visual.position;
+        if (!position) continue;
+        nextSteps.push({ kind: "wait", placeId: current, start: state.time, end: timing.depart, position });
+      }
+      let segmentTime = timing.depart;
+      const timedGeometry = connectionGeometry.map(segment => {
+        const value = { role: segment.role, start: segmentTime, end: segmentTime + segment.duration, path: segment.path };
+        segmentTime += segment.duration;
+        return value;
+      });
+      nextSteps.push({ kind: "movement", connectionId: connection.id, from: connection.from, to: connection.to, start: timing.depart, end: timing.arrive, geometry: timedGeometry });
+      const candidate: State = { time: timing.arrive, depart: state.ids.length ? state.depart : timing.depart, ids: nextIds, path: nextPath, itinerary: nextSteps };
+      const previous = best.get(connection.to);
+      if (!previous || candidate.time < previous.time || (candidate.time === previous.time && nextIds.join("/") < previous.ids.join("/"))) {
+        best.set(connection.to, candidate);
+        if (!queue.includes(connection.to)) queue.push(connection.to);
+      }
     }
   }
-  const found = best.get(to); return found ? { connectionIds: found.ids, depart: found.depart, arrive: found.time, path: found.path } : undefined;
+  const found = best.get(to);
+  if (!found) return undefined;
+  const destination = world.entities.find((entity: Place) => entity.id === to)?.visual.position;
+  if (!origin || !destination) return undefined;
+  return { from, to, fromPosition: origin, toPosition: destination, connectionIds: found.ids, plannedDepart: start, depart: found.ids.length ? found.depart : start, arrive: found.time, path: found.path, itinerary: found.itinerary };
 }
 
 function earliestPossibleCompletion(world: World, event: Event): number | undefined {
@@ -39,9 +78,7 @@ function earliestPossibleCompletion(world: World, event: Event): number | undefi
     const parentTime = earliestPossibleCompletion(world, parent);
     return parentTime === undefined ? undefined : parentTime + event.delay!;
   }
-  if (event.kind === "transport") {
-    return findRoute(world, event.from!, event.to!, event.mode!, event.at!)?.arrive;
-  }
+  if (event.kind === "transport") return findRoute(world, event.from!, event.to!, event.mode!, event.at!)?.arrive;
   return event.at;
 }
 
@@ -52,85 +89,125 @@ export function simulate(input: World): Simulation {
   const visiting = new Set<string>();
   function resolve(event: Event): EventResult {
     if (results.has(event.id)) return results.get(event.id)!;
-    if (visiting.has(event.id)) throw new Error(`Cyclic dependency: ${event.id}`);
+    if (visiting.has(event.id)) throw new Error("Cyclic dependency: " + event.id);
     visiting.add(event.id);
-    if (event.afterEventId) resolve(world.events.find(x => x.id === event.afterEventId)!);
-    for (const r of event.requirements) if (r.type === "eventOccurred") resolve(world.events.find(x => x.id === r.eventId)!);
+    if (event.afterEventId) resolve(world.events.find(candidate => candidate.id === event.afterEventId)!);
+    for (const requirement of event.requirements) if (requirement.type === "eventOccurred") resolve(world.events.find(candidate => candidate.id === requirement.eventId)!);
     const parent = event.afterEventId ? results.get(event.afterEventId) : undefined;
     const time = event.kind === "dependent" ? (parent?.time !== null && parent?.status === "possible" ? parent!.time! + event.delay! : null) : event.at!;
     const at = time ?? 0;
     const reasons: Reason[] = [];
     if (time === null) reasons.push({ requirement: { type: "route" }, observed: "Preceding event has no completion time", status: parent?.status ?? "unknown", involved: [event.afterEventId!], causes: [event.afterEventId!] });
-    for (const r of time === null ? [] : event.requirements) {
-      if (r.type === "eventOccurred") {
-        const prior = results.get(r.eventId)!;
+    for (const requirement of time === null ? [] : event.requirements) {
+      if (requirement.type === "eventOccurred") {
+        const prior = results.get(requirement.eventId)!;
         const status: Feasibility = prior.status === "possible" ? (prior.time! <= at ? "possible" : "impossible") : prior.status;
-        reasons.push({ requirement: r, observed: prior.time === null ? prior.status : `${prior.status} at ${formatTime(prior.time,world.originMinute)}`, status, involved: [r.eventId], causes: [r.eventId] });
-      } else if (r.type === "entityAt") {
-        const entity = world.entities.find(x => x.id === r.entityId)!;
-        // Resolve every transport that could have started by this instant before
-        // reading location. Event IDs are identities, not temporal ordering.
-        for (const candidate of ordered(world.events).filter(candidate =>
-          candidate.id !== event.id &&
-          !visiting.has(candidate.id) &&
-          candidate.kind === "transport" &&
-          candidate.at! <= at &&
-          candidate.actorIds.includes(r.entityId)
-        )) resolve(candidate);
-        const movement = [...results.values()]
-          .filter(result => {
-            const candidate = world.events.find(x => x.id === result.id);
-            return result.status === "possible" && result.route !== undefined &&
-              result.route.depart <= at && candidate?.actorIds.includes(r.entityId);
-          })
-          .sort((a, b) => a.route!.depart - b.route!.depart || a.route!.arrive - b.route!.arrive || a.id.localeCompare(b.id))
-          .at(-1);
-        const place = movement?.route
-          ? (at >= movement.route.arrive ? world.events.find(e => e.id === movement.id)!.to! : "in transit")
+        reasons.push({ requirement, observed: prior.time === null ? prior.status : formatTime(prior.time,world.originMinute), status, involved: [requirement.eventId], causes: [requirement.eventId] });
+      } else if (requirement.type === "entityAt") {
+        const entity = world.entities.find(candidate => candidate.id === requirement.entityId)!;
+        // Resolve transports by their declared time, never by document ID order.
+        for (const candidate of ordered(world.events).filter(candidate => candidate.id !== event.id && !visiting.has(candidate.id) && candidate.kind === "transport" && candidate.at! <= at && candidate.actorIds.includes(requirement.entityId))) resolve(candidate);
+        const movements = [...results.values()].filter(result => {
+          const candidate = world.events.find(item => item.id === result.id);
+          return result.status === "possible" && result.route !== undefined && result.route.plannedDepart <= at && candidate?.actorIds.includes(requirement.entityId);
+        }).sort((a,b) => a.route!.plannedDepart - b.route!.plannedDepart || a.route!.arrive - b.route!.arrive || a.id.localeCompare(b.id));
+        const last = movements.at(-1);
+        const lastKnownDeparture = last?.route?.plannedDepart ?? Number.NEGATIVE_INFINITY;
+        const unresolvedTransport = ordered(world.events).some(candidate => candidate.kind === "transport" &&
+          candidate.actorIds.includes(requirement.entityId) && candidate.at! <= at && candidate.at! >= lastKnownDeparture &&
+          results.get(candidate.id)?.status === "unknown");
+        const place = unresolvedTransport ? undefined : last?.route
+          ? (at >= last.route.arrive ? world.events.find(candidate => candidate.id === last.id)!.to! : "in transit")
           : entity.initialPlaceId;
-        const status = place === r.placeId ? "possible" : place ? "impossible" : "unknown";
-        reasons.push({ requirement: r, observed: place ?? "unknown", status, involved: [r.entityId, r.placeId], causes: movement ? [movement.id] : [] });
+        const status: Feasibility = unresolvedTransport || !place ? "unknown" : place === requirement.placeId ? "possible" : "impossible";
+        reasons.push({ requirement, observed: place ?? "unknown", status, involved: [requirement.entityId, requirement.placeId], causes: last ? [last.id] : [] });
       } else {
-        // Only producers that could have completed by this instant can affect
-        // the read. A future event is not a dependency of the current event.
-        // If a relevant producer is already being resolved, keep cycle detection
-        // active: that is a real causal cycle, unlike a future scheduling entry.
-        for (const producer of ordered(world.events).filter(candidate =>
-          candidate.effects.some(effect => effect.key === r.key)
-        )) {
+        // Only effects which could already have completed are causal inputs to this read.
+        for (const producer of ordered(world.events).filter(candidate => candidate.effects.some(effect => effect.key === requirement.key))) {
           const earliest = earliestPossibleCompletion(world, producer);
           if (earliest !== undefined && earliest <= at) resolve(producer);
         }
-        const derived = [...results.values()]
-          .filter(result => result.status === "possible" && result.time !== null && result.time <= at)
-          .flatMap(result => world.events.find(e => e.id === result.id)!.effects.map(effect => ({ ...effect, eventId: result.id, time: result.time! })))
-          .filter(effect => effect.key === r.key)
-          .sort((a, b) => a.time - b.time || a.eventId.localeCompare(b.eventId))
-          .at(-1);
-        const declared = world.facts.find(x => x.key === r.key && x.interval.start <= at && at < x.interval.end);
+        const derived = [...results.values()].filter(result => result.status === "possible" && result.time !== null && result.time <= at)
+          .flatMap(result => world.events.find(candidate => candidate.id === result.id)!.effects.map(effect => ({ ...effect, eventId: result.id, time: result.time! })))
+          .filter(effect => effect.key === requirement.key).sort((a,b) => a.time - b.time || a.eventId.localeCompare(b.eventId)).at(-1);
+        const declared = world.facts.find(fact => fact.key === requirement.key && fact.interval.start <= at && at < fact.interval.end);
         const actual = derived?.value ?? declared?.value;
-        const status = actual === undefined ? "unknown" : actual === r.value ? "possible" : "impossible";
-        reasons.push({ requirement: r, observed: actual === undefined ? "missing at this time" : String(actual), status, involved: [r.key], causes: derived ? [derived.eventId] : declared ? [declared.id] : [] });
+        const status: Feasibility = actual === undefined ? "unknown" : actual === requirement.value ? "possible" : "impossible";
+        reasons.push({ requirement, observed: actual === undefined ? "missing at this time" : String(actual), status, involved: [requirement.key], causes: derived ? [derived.eventId] : declared ? [declared.id] : [] });
       }
     }
     let route: Route | undefined;
-    if (event.kind === "transport" && time !== null && reasons.every(r => r.status === "possible")) {
+    if (event.kind === "transport" && time !== null && reasons.every(reason => reason.status === "possible")) {
       route = findRoute(world, event.from!, event.to!, event.mode!, time);
-      if (!route) reasons.push({ requirement: { type: "route" }, observed: world.networkComplete ? "No available path" : "Network incomplete", status: world.networkComplete ? "impossible" : "unknown", involved: [event.from!, event.to!], causes: ordered(world.connections).map(c => c.id) });
+      if (!route) reasons.push({ requirement: { type: "route" }, observed: world.networkComplete ? "No available path" : "Network incomplete", status: world.networkComplete ? "impossible" : "unknown", involved: [event.from!, event.to!], causes: ordered(world.connections).map(connection => connection.id) });
     }
-    const status: Feasibility = reasons.some(r => r.status === "impossible") ? "impossible" : reasons.some(r => r.status === "unknown") ? "unknown" : "possible";
+    const status: Feasibility = reasons.some(reason => reason.status === "impossible") ? "impossible" : reasons.some(reason => reason.status === "unknown") ? "unknown" : "possible";
     const result: EventResult = { id: event.id, name: event.name, time: status === "possible" ? (route?.arrive ?? time) : time, status, ...(route ? { route } : {}), reasons };
     results.set(event.id, result); visiting.delete(event.id); return result;
   }
-  for (const e of events) resolve(e);
-  const artifacts = ordered(world.artifacts).map(a => {
-    const checks = a.claims.map(c => { const r = results.get(c.eventId)!; return { id: c.eventId, status: r.status === "unknown" ? "unknown" : (r.status === "possible") === c.occurred ? "supported" : "unsupported" }; });
-    return { id: a.id, title: a.title, compatibility: checks.some(c => c.status === "unsupported") ? "unsupported" : checks.some(c => c.status === "unknown") ? "unknown" : "supported", causes: checks.filter(c => c.status !== "supported").map(c => c.id) } as ArtifactResult;
+  for (const event of events) resolve(event);
+  const artifacts = ordered(world.artifacts).map(artifact => {
+    const checks = artifact.claims.map(claim => {
+      const result = results.get(claim.eventId)!;
+      return { id: claim.eventId, status: result.status === "unknown" ? "unknown" : result.status === "possible" === claim.occurred ? "supported" : "unsupported" };
+    });
+    return { id: artifact.id, title: artifact.title, compatibility: checks.some(check => check.status === "unsupported") ? "unsupported" : checks.some(check => check.status === "unknown") ? "unknown" : "supported", causes: checks.filter(check => check.status !== "supported").map(check => check.id) } as ArtifactResult;
   });
-  const derivedFacts=[...results.values()].filter(r=>r.status==="possible"&&r.time!==null).flatMap(r=>world.events.find(e=>e.id===r.id)!.effects.map(effect=>({key:effect.key,value:effect.value,source:"derived" as const,eventId:r.id,interval:{start:r.time!,end:world.horizon}})));
+  const derivedFacts = [...results.values()].filter(result => result.status === "possible" && result.time !== null).flatMap(result => world.events.find(event => event.id === result.id)!.effects.map(effect => ({ key: effect.key, value: effect.value, source: "derived" as const, eventId: result.id, interval: { start: result.time!, end: world.horizon } })));
   return { worldId: world.id, revision: world.baseRevision, events: [...results.values()].sort((a,b) => a.id.localeCompare(b.id)), artifacts, derivedFacts };
 }
 
-export function getEvent(result: Simulation, id: string): EventResult { const event = result.events.find(x => x.id === id); if (!event) throw new Error(`Missing event ${id}`); return event; }
-export function formatTime(minute: number | null, originMinute=960): string { if (minute === null) return "—"; const total = originMinute + minute; return `${String(Math.floor(total / 60)).padStart(2,"0")}:${String(total % 60).padStart(2,"0")}`; }
-export function compare(original: Simulation, variant: Simulation) { return variant.events.map(v => { const o = getEvent(original, v.id); return { id: v.id, original: o, variant: v, timing: v.time === o.time ? "unchanged" : v.time === null || o.time === null ? "indeterminate" : v.time > o.time ? "later" : "earlier" }; }); }
+function pointAlongPath(path: [number, number][], progress: number): [number, number] {
+  if (!path.length) return [0, 0];
+  if (path.length === 1) return path[0];
+  const lengths = path.slice(1).map((point, index) => Math.hypot(point[0] - path[index][0], point[1] - path[index][1]));
+  const total = lengths.reduce((sum, length) => sum + length, 0);
+  if (total <= Number.EPSILON) return path[0];
+  let remaining = Math.max(0, Math.min(1, progress)) * total;
+  for (let index = 0; index < lengths.length; index++) {
+    const length = lengths[index];
+    if (remaining <= length || index === lengths.length - 1) {
+      const ratio = length <= Number.EPSILON ? 0 : Math.max(0, Math.min(1, remaining / length));
+      return [path[index][0] + (path[index + 1][0] - path[index][0]) * ratio, path[index][1] + (path[index + 1][1] - path[index][1]) * ratio];
+    }
+    remaining -= length;
+  }
+  return path.at(-1)!;
+}
+
+export function sampleRoute(route: Route, minute: number): PositionSample {
+  if (minute < route.plannedDepart) return { status: "waiting", position: route.itinerary.find(step => step.kind === "wait")?.position ?? route.fromPosition, placeId: route.from };
+  for (const step of route.itinerary) {
+    if (step.kind === "wait" && minute >= step.start && minute < step.end) return { status: "waiting", position: step.position, placeId: step.placeId };
+    if (step.kind === "movement" && minute >= step.start && minute < step.end) {
+      const geometry = step.geometry.find(segment => minute >= segment.start && minute < segment.end) ?? step.geometry.at(-1);
+      if (!geometry) return { status: "moving", position: pointAlongPath(route.path, (minute - step.start) / Math.max(step.end - step.start, 1)), connectionId: step.connectionId };
+      return { status: "moving", position: pointAlongPath(geometry.path, (minute - geometry.start) / Math.max(geometry.end - geometry.start, 1)), connectionId: step.connectionId, role: geometry.role };
+    }
+  }
+  return { status: "at-place", position: route.path.length ? pointAlongPath(route.path, 1) : route.toPosition, placeId: route.to };
+}
+
+export function sampleEntity(world: World, simulation: Simulation, entityId: string, minute: number): PositionSample {
+  const entity = world.entities.find(candidate => candidate.id === entityId);
+  if (!entity) return { status: "unknown" };
+  const transports = world.events.filter(event => event.kind === "transport" && event.actorIds.includes(entityId)).sort((a,b) => a.at! - b.at! || a.id.localeCompare(b.id));
+  let placeId = entity.initialPlaceId;
+  let position = placeId ? world.entities.find(candidate => candidate.id === placeId)?.visual.position : entity.visual.position;
+  for (const event of transports) {
+    if (event.at! > minute) break;
+    const result = simulation.events.find(candidate => candidate.id === event.id);
+    if (!result) return { status: "unknown" };
+    if (result.status === "unknown") return { status: "unknown", ...(position ? { position } : {}), ...(placeId ? { placeId } : {}) };
+    if (result.status !== "possible" || !result.route) continue;
+    if (minute < result.route.plannedDepart) break;
+    if (minute < result.route.arrive) return sampleRoute(result.route, minute);
+    placeId = event.to;
+    position = world.entities.find(candidate => candidate.id === placeId)?.visual.position ?? position;
+  }
+  return position ? { status: "at-place", position, ...(placeId ? { placeId } : {}) } : { status: "unknown" };
+}
+
+export function getEvent(result: Simulation, id: string): EventResult { const event = result.events.find(candidate => candidate.id === id); if (!event) throw new Error("Missing event " + id); return event; }
+export function formatTime(minute: number | null, originMinute=960): string { if (minute === null) return "—"; const total = originMinute + minute; return String(Math.floor(total / 60)).padStart(2,"0") + ":" + String(total % 60).padStart(2,"0"); }
+export function compare(original: Simulation, variant: Simulation) { return variant.events.map(current => { const before = getEvent(original, current.id); return { id: current.id, original: before, variant: current, timing: current.time === before.time ? "unchanged" : current.time === null || before.time === null ? "indeterminate" : current.time > before.time ? "later" : "earlier" }; }); }

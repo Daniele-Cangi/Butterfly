@@ -4,8 +4,11 @@ const id = z.string().min(1);
 const minute = z.number().int().min(0).max(1440);
 const interval = z.object({ start: minute, end: minute });
 const point = z.tuple([z.number(), z.number()]);
+const compositionEntity = z.object({ entityId: id, position: point });
 export const entitySchema = z.object({ id, worldId: id, kind: z.enum(["person", "place", "object"]), name: z.string(), initialPlaceId: id.optional(), visual: z.object({ kind: z.string(), color: z.string(), position: point.optional() }) });
-export const connectionSchema = z.object({ id, worldId: id, from: id, to: id, modes: z.array(z.string()).min(1), duration: minute.positive(), windows: z.array(interval).min(1), enabled: z.boolean(), path: z.array(point).min(2) });
+export const routeRoleSchema = z.enum(["road", "bridge", "ferry"]);
+export const routeSegmentSchema = z.object({ role: routeRoleSchema, duration: minute.positive(), path: z.array(point).min(2) });
+export const connectionSchema = z.object({ id, worldId: id, label: z.string().min(1).optional(), from: id, to: id, modes: z.array(z.string()).min(1), duration: minute.positive(), windows: z.array(interval).min(1), enabled: z.boolean(), path: z.array(point).min(2), segments: z.array(routeSegmentSchema).min(1).optional() });
 export const factSchema = z.object({ id, worldId: id, key: id, value: z.union([z.string(), z.number(), z.boolean()]), interval, source: z.literal("input") });
 export const requirementSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("eventOccurred"), eventId: id }),
@@ -20,12 +23,16 @@ export const interventionSchema = z.discriminatedUnion("type", [
 ]);
 export const worldSchema = z.object({
   id, baseRevision: id, title: z.string(), origin: z.string(), originMinute: minute, horizon: minute,
-  networkComplete: z.boolean(), closureEditableConnectionIds: z.array(id), visitorClosure:z.object({connectionId:id,end:minute}),featuredMoment:z.object({eventId:id,placeId:id}),entities: z.array(entitySchema), connections: z.array(connectionSchema), facts: z.array(factSchema), events: z.array(eventSchema), artifacts: z.array(artifactSchema), interventions: z.array(interventionSchema)
+  networkComplete: z.boolean(), closureEditableConnectionIds: z.array(id), visitorClosure:z.object({connectionId:id,end:minute}),
+  featuredMoment:z.object({eventId:id,placeId:id,arrangementEventId:id,photographerEntityId:id,subjectEntityIds:z.array(id).min(1),propEntityIds:z.array(id).min(1),composition:z.object({photographerPosition:point,subjectPositions:z.array(compositionEntity).min(1),propPositions:z.array(compositionEntity).min(1)})}),
+  presentation:z.object({eventOrder:z.array(id),roles:z.object({deliveryEventId:id,setupEventId:id,ceremonyEventId:id,courierEntityId:id,vehicleEntityId:id,floralEntityId:id,depotPlaceId:id,plazaPlaceId:id,pierPlaceId:id,landingPlaceId:id,storyArtifactId:id})}),
+  entities: z.array(entitySchema), connections: z.array(connectionSchema), facts: z.array(factSchema), events: z.array(eventSchema), artifacts: z.array(artifactSchema), interventions: z.array(interventionSchema)
 });
 export type World = z.infer<typeof worldSchema>;
 export type Event = World["events"][number];
 export type Requirement = Event["requirements"][number];
 export type Connection = World["connections"][number];
+export type ConnectionSegment = NonNullable<Connection["segments"]>[number];
 export type Operation = { type: "setEventTime"; eventId: string; value: number } | { type: "enableConnection"; connectionId: string; value: boolean } | { type: "setConnectionEnd"; connectionId: string; value: number };
 export type RealityPatch = { worldId: string; baseRevision: string; operations: Operation[] };
 
@@ -40,13 +47,38 @@ export function validateWorld(input: unknown): World {
   unique(world.facts, "fact"); unique(world.artifacts, "artifact");
   const places = new Set(world.entities.filter(e => e.kind === "place").map(e => e.id));
   for (const e of world.entities) if (e.initialPlaceId && !places.has(e.initialPlaceId)) throw new Error(`Missing place ${e.initialPlaceId}`);
+  const entityById = new Map(world.entities.map(entity => [entity.id, entity]));
   for (const c of world.connections) {
     if (!places.has(c.from) || !places.has(c.to)) throw new Error(`Connection ${c.id} has a missing endpoint`);
     for (const w of c.windows) if (w.start >= w.end) throw new Error(`Connection ${c.id} has an invalid window`);
+    if (c.segments && c.segments.reduce((sum, segment) => sum + segment.duration, 0) !== c.duration) throw new Error(`Connection ${c.id} segment durations must total ${c.duration}`);
+    const start = entityById.get(c.from)?.visual.position;
+    const end = entityById.get(c.to)?.visual.position;
+    const geometry = c.segments?.flatMap((segment, index) => index ? segment.path.slice(1) : segment.path) ?? c.path;
+    if (start && (geometry[0][0] !== start[0] || geometry[0][1] !== start[1])) throw new Error(`Connection ${c.id} visual path must start at ${c.from}`);
+    if (end && (geometry.at(-1)![0] !== end[0] || geometry.at(-1)![1] !== end[1])) throw new Error(`Connection ${c.id} visual path must end at ${c.to}`);
   }
   for (const closureId of world.closureEditableConnectionIds) if (!connections.has(closureId)) throw new Error(`Missing editable closure ${closureId}`);
   if(!world.closureEditableConnectionIds.includes(world.visitorClosure.connectionId))throw new Error("Visitor closure is not editable");
   if(!events.has(world.featuredMoment.eventId)||!places.has(world.featuredMoment.placeId))throw new Error("Featured moment reference missing");
+  const featured = world.events.find(event => event.id === world.featuredMoment.eventId)!;
+  const roles = world.presentation.roles;
+  for (const id of [world.featuredMoment.photographerEntityId, ...world.featuredMoment.subjectEntityIds, ...world.featuredMoment.propEntityIds, roles.courierEntityId, roles.vehicleEntityId, roles.floralEntityId]) if (!entities.has(id)) throw new Error(`Presentation references missing entity ${id}`);
+  for (const id of [roles.depotPlaceId, roles.plazaPlaceId, roles.pierPlaceId, roles.landingPlaceId, world.featuredMoment.placeId]) if (!places.has(id)) throw new Error(`Presentation references missing place ${id}`);
+  if (!events.has(world.featuredMoment.arrangementEventId) || !events.has(roles.deliveryEventId) || !events.has(roles.setupEventId) || !events.has(roles.ceremonyEventId)) throw new Error("Presentation references a missing event");
+  if (!world.artifacts.some(artifact => artifact.id === roles.storyArtifactId && artifact.claims.some(claim => claim.eventId === world.featuredMoment.eventId))) throw new Error("Presentation story artifact must claim the featured moment");
+  if (featured.at === undefined || featured.kind !== "fixed" || !featured.requirements.some(requirement => requirement.type === "entityAt" && requirement.placeId === world.featuredMoment.placeId)) throw new Error("Featured moment must be a fixed event at its featured place");
+  if (world.presentation.eventOrder.length === 0 || new Set(world.presentation.eventOrder).size !== world.presentation.eventOrder.length || world.presentation.eventOrder.some(id => !events.has(id))) throw new Error("Presentation event order must contain unique references to known events");
+  const byId = new Map(world.events.map(event => [event.id, event]));
+  const delivery = byId.get(roles.deliveryEventId)!;
+  if (delivery.kind !== "transport" || !delivery.actorIds.includes(roles.courierEntityId) || !delivery.actorIds.includes(roles.floralEntityId) || !delivery.actorIds.includes(roles.vehicleEntityId)) throw new Error("Delivery role must bind its courier, vehicle and floral resource");
+  if (!world.featuredMoment.subjectEntityIds.includes(world.featuredMoment.photographerEntityId) || !featured.actorIds.includes(world.featuredMoment.photographerEntityId)) throw new Error("Featured photographer must be an event actor");
+  for (const entityId of [world.featuredMoment.photographerEntityId, ...world.featuredMoment.subjectEntityIds, ...world.featuredMoment.propEntityIds]) {
+    if (!featured.requirements.some(requirement => requirement.type === "entityAt" && requirement.entityId === entityId && requirement.placeId === world.featuredMoment.placeId)) throw new Error(`Featured moment is missing location requirement for ${entityId}`);
+  }
+  const composition = world.featuredMoment.composition;
+  if (!composition.subjectPositions.some(item => item.entityId === world.featuredMoment.photographerEntityId) || world.featuredMoment.subjectEntityIds.some(id => !composition.subjectPositions.some(item => item.entityId === id)) || world.featuredMoment.propEntityIds.some(id => !composition.propPositions.some(item => item.entityId === id))) throw new Error("Featured moment composition must position all subjects and props");
+  if (!byId.has(world.featuredMoment.arrangementEventId) || world.featuredMoment.propEntityIds.length === 0) throw new Error("Featured moment composition is incomplete");
   for (const f of world.facts) if (f.interval.start >= f.interval.end) throw new Error(`Fact ${f.id} has an invalid interval`);
   for (let a=0;a<world.facts.length;a++)for(let b=a+1;b<world.facts.length;b++){const x=world.facts[a],y=world.facts[b];if(x.key===y.key&&x.value!==y.value&&x.interval.start<y.interval.end&&y.interval.start<x.interval.end)throw new Error(`Contradictory facts for ${x.key}`)}
   for (const e of world.events) {
