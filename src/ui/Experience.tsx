@@ -452,7 +452,7 @@ export default function Experience({ initialWorld, source, error }: { initialWor
           </div>
 
           <div className="story-explanation" data-state={activeTarget.status}>
-            <span className="section-label">{closureLocked ? "WHAT CHANGED" : "THE ORIGINAL PLAN"}</span>
+            <span className="section-label">{closureLocked ? "WHAT CHANGED" : patch.operations.length > 0 ? "YOUR VARIANT" : "THE ORIGINAL PLAN"}</span>
             <p>{explainDay(activeWorld, activeResult)}</p>
             {closureLocked && <button className="quiet" onClick={() => { setShowEvidence(value => !value); setSelected(goal.eventId); }} aria-expanded={showEvidence}>{showEvidence ? "Hide route and causes" : "Show route and causes"}</button>}
           </div>

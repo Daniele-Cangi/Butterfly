@@ -115,10 +115,12 @@ test("original, missed MomentFrame, ferry recovery, intermediate wait, apply and
 
   await page.getByRole("button", { name: "Restore bridge schedule" }).click();
   await expect(page.getByRole("status")).toContainText("The chosen composition remains possible.");
+  await expect(page.locator(".story-explanation .section-label")).toHaveText("YOUR VARIANT");
   await page.getByRole("button", { name: "Close bridge at 16:15" }).click();
   await expect(page.getByRole("heading", { name: "The photograph happened at 16:50." })).toBeVisible();
   await expect(page.getByText("Bridge closure locked during recovery")).toBeVisible();
   await expect(page.getByRole("status")).toContainText("The chosen composition remains possible.");
+  await expect(page.locator(".story-explanation .section-label")).toHaveText("WHAT CHANGED");
   expect(errors).toEqual([]);
 });
 
