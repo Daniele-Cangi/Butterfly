@@ -221,6 +221,7 @@ test("mobile reduced-motion MomentFrame and text controls remain usable", async 
   await page.getByRole("button", { name: /^The photograph:/ }).click();
   await page.getByRole("button", { name: "Keep this moment" }).click();
   await page.getByRole("button", { name: "Find alternatives" }).click();
+  await expect(page.getByRole("status")).toContainText("2 verified alternatives found");
   await expect(page.getByRole("group", { name: "MomentFrame versions" })).toBeVisible();
   await page.getByRole("button", { name: "Activate ferry", exact: true }).click();
   await page.getByRole("button", { name: "Recovery preview", exact: true }).click();
@@ -229,6 +230,29 @@ test("mobile reduced-motion MomentFrame and text controls remain usable", async 
   await expect(page.getByRole("button", { name: "Use this solution" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   expect(errors).toEqual([]);
+});
+
+test("desktop scrolling can continue from the side rail through Keep also", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Close bridge at 16:15" }).click();
+  const side = page.locator(".side");
+  await side.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  await side.hover();
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const visible = await page.locator(".constraints").evaluate(element => {
+      const bounds = element.getBoundingClientRect();
+      return bounds.top >= 0 && bounds.bottom <= window.innerHeight;
+    });
+    if (visible) break;
+    await page.mouse.wheel(0, 650);
+  }
+
+  await expect(page.locator(".constraints")).toBeInViewport({ ratio: 1 });
+  await expect(page.getByRole("checkbox", { name: "Do not depart before 16:20" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Ferry starts operating at" })).toBeVisible();
+  await page.screenshot({ path: screenshotDirectory + "/13-constraints-scroll-handoff-desktop.png" });
 });
 
 test("studio route exposes its configuration or Sanity connection state", async ({ page }) => {

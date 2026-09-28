@@ -280,7 +280,8 @@ export default function Experience({ initialWorld, source, error }: { initialWor
     setShowEvidence(false);
     setPlaying(false);
     seek(goal.time, true);
-    setAnnouncement(nextSearch.status === "found" ? `${nextSearch.alternatives.length} distinct alternatives found. None has been applied.` : nextSearch.status === "exhausted" ? "No alternative preserves this composition in the explored domain." : `Search result: ${nextSearch.status}.`);
+    const foundAnnouncement = `${nextSearch.meaningfulCount} verified ${nextSearch.meaningfulCount === 1 ? "alternative" : "alternatives"} found. ${nextSearch.meaningfulCount > nextSearch.alternatives.length ? `Showing ${nextSearch.alternatives.length} cards. ` : ""}None has been applied.`;
+    setAnnouncement(nextSearch.status === "found" ? foundAnnouncement : nextSearch.status === "exhausted" ? "No alternative preserves this composition in the explored domain." : `Search result: ${nextSearch.status}.`);
   };
 
   const chooseAlternative = (alternativeId: string) => {

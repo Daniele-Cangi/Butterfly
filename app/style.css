@@ -252,7 +252,7 @@ button, .event-row, .alternative { transition: background-color 180ms ease, bord
 .frame-close { flex: 0 0 auto; padding: 5px 0; border: 0; background: transparent; color: var(--teal); font-size: 10px; font-weight: 700; }
 .frame-close:hover { text-decoration: underline; text-underline-offset: 3px; }
 
-.side { overflow: auto; overscroll-behavior: contain; padding: 29px 27px 30px; background: var(--paper-light); scrollbar-color: var(--line-strong) transparent; scrollbar-width: thin; }
+.side { overflow: auto; padding: 29px 27px 30px; background: var(--paper-light); scrollbar-color: var(--line-strong) transparent; scrollbar-width: thin; }
 .side-intro { padding-bottom: 20px; border-bottom: 1px solid var(--line); }
 .side-intro[data-changed='true'] { padding-bottom: 13px; }
 .side-intro[data-changed='true'] .case-note, .side-intro[data-changed='true'] .time-note { display: none; }
