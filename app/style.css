@@ -41,7 +41,7 @@ button:disabled { cursor: not-allowed; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
 button, .event-row, .alternative { transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease; }
 
-.experience { min-height: 100vh; display: flex; flex-direction: column; }
+.experience { min-height: 100vh; display: flex; flex-direction: column; padding-bottom: var(--space-6); }
 .topbar {
   min-height: 72px;
   padding: 10px 32px;

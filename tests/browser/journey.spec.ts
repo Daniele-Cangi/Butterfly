@@ -240,18 +240,17 @@ test("desktop scrolling can continue from the side rail through Keep also", asyn
   await side.evaluate(element => { element.scrollTop = element.scrollHeight; });
   await side.hover();
 
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const visible = await page.locator(".constraints").evaluate(element => {
-      const bounds = element.getBoundingClientRect();
-      return bounds.top >= 0 && bounds.bottom <= window.innerHeight;
-    });
-    if (visible) break;
+  for (let attempt = 0; attempt < 6; attempt++) {
     await page.mouse.wheel(0, 650);
+    const atPageBottom = await page.evaluate(() => Math.ceil(window.scrollY + window.innerHeight) >= document.documentElement.scrollHeight);
+    if (atPageBottom) break;
   }
 
   await expect(page.locator(".constraints")).toBeInViewport({ ratio: 1 });
   await expect(page.getByRole("checkbox", { name: "Do not depart before 16:20" })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Ferry starts operating at" })).toBeVisible();
+  const bottomGap = await page.locator(".constraints").evaluate(element => document.documentElement.scrollHeight - window.scrollY - element.getBoundingClientRect().bottom);
+  expect(bottomGap).toBeGreaterThanOrEqual(24);
   await page.screenshot({ path: screenshotDirectory + "/13-constraints-scroll-handoff-desktop.png" });
 });
 
