@@ -73,7 +73,10 @@ export function validateWorld(input: unknown): World {
   if (world.visitorFerryOpening) {
     const { connectionId, values } = world.visitorFerryOpening;
     const connection = world.connections.find(item => item.id === connectionId);
-    if (!connection || connectionId === world.visitorClosure.connectionId || !connection.modes.includes("van") || connection.windows.length !== 1 || !connection.segments?.some(segment => segment.role === "ferry")) throw new Error("Visitor ferry opening must reference a separate ferry connection with one operating window");
+    const delivery = world.events.find(event => event.id === world.presentation.roles.deliveryEventId);
+    const deliveryMode = delivery?.kind === "transport" ? delivery.mode : undefined;
+    const activation = world.interventions.find((item): item is Extract<World["interventions"][number], { type: "enableConnection" }> => item.type === "enableConnection" && item.connectionId === connectionId);
+    if (!connection || !deliveryMode || connectionId === world.visitorClosure.connectionId || !connection.modes.includes(deliveryMode) || activation && activation.precondition.requiredMode !== deliveryMode || connection.windows.length !== 1 || !connection.segments?.some(segment => segment.role === "ferry")) throw new Error("Visitor ferry opening must reference a separate ferry connection compatible with the delivery mode, with one operating window");
     if (new Set(values).size !== values.length || values.some(value => value >= connection.windows[0].end) || !values.includes(connection.windows[0].start)) throw new Error("Visitor ferry opening values must include the authored start and fit its window");
   }
   if(!events.has(world.featuredMoment.eventId)||!places.has(world.featuredMoment.placeId))throw new Error("Featured moment reference missing");

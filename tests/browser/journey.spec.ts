@@ -112,6 +112,13 @@ test("original, missed MomentFrame, ferry recovery, intermediate wait, apply and
   await expect(page.getByText("Bridge closure locked during recovery")).toBeVisible();
   await expect(page.getByText("16:30 → 16:10")).toBeVisible();
   await capture(page, "08-early-departure-recovery-applied-desktop.png");
+
+  await page.getByRole("button", { name: "Restore bridge schedule" }).click();
+  await expect(page.getByRole("status")).toContainText("The chosen composition remains possible.");
+  await page.getByRole("button", { name: "Close bridge at 16:15" }).click();
+  await expect(page.getByRole("heading", { name: "The photograph happened at 16:50." })).toBeVisible();
+  await expect(page.getByText("Bridge closure locked during recovery")).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("The chosen composition remains possible.");
   expect(errors).toEqual([]);
 });
 

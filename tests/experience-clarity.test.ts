@@ -51,6 +51,28 @@ describe("a clearer recovery domain", () => {
     expect(keepThisMoment(sampleWorld, lateFerry, goal).alternatives.some(alternative => alternative.operations.some(operation => operation.type === "setEventTime" && operation.value === 0))).toBe(true);
   });
 
+  it("binds authored ferry compatibility to the delivery mode instead of assuming vans", () => {
+    const authored = structuredClone(sampleWorld);
+    authored.events.find(event => event.id === "delivery")!.mode = "truck";
+    for (const connection of authored.connections) connection.modes = connection.modes.map(mode => mode === "van" ? "truck" : mode);
+    for (const intervention of authored.interventions) {
+      if (intervention.type === "enableConnection") intervention.precondition.requiredMode = "truck";
+    }
+
+    const world = validateWorld(authored);
+    const alternatives = keepThisMoment(world, closed, goal);
+    const ferry = alternatives.alternatives.find(alternative => alternative.operations.some(operation => operation.type === "enableConnection"));
+    expect(ferry).toBeDefined();
+    expect(getEvent(ferry!.result, "delivery").route?.connectionIds).toEqual(["land-to-pier", "ferry", "landing-road"]);
+    expect(getEvent(ferry!.result, "photo").status).toBe("possible");
+
+    const incompatibleActivation = structuredClone(authored);
+    for (const intervention of incompatibleActivation.interventions) {
+      if (intervention.type === "enableConnection" && intervention.connectionId === "ferry") intervention.precondition.requiredMode = "van";
+    }
+    expect(() => validateWorld(incompatibleActivation)).toThrow(/compatible with the delivery mode/i);
+  });
+
   it("rechecks the selected option under current constraints and rejects invalid schedule edits", () => {
     const early = keepThisMoment(sampleWorld, closed, goal).alternatives.find(alternative => alternative.operations.some(operation => operation.type === "setEventTime"))!;
     expect(() => applyAlternative(sampleWorld, closed, goal, early, departureLimit)).toThrow(/stale/i);

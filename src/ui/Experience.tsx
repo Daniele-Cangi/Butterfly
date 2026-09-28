@@ -249,6 +249,12 @@ export default function Experience({ initialWorld, source, error }: { initialWor
       ? patch.operations.filter(operation => operation.type !== "setConnectionEnd")
       : [...patch.operations, { type: "setConnectionEnd", connectionId: initialWorld.visitorClosure.connectionId, value: initialWorld.visitorClosure.end }];
     const nextPatch = { worldId: initialWorld.id, baseRevision: initialWorld.baseRevision, operations };
+    const nextComposition = getEvent(simulate(applyPatch(initialWorld, nextPatch)), goal.eventId);
+    const compositionAnnouncement = nextComposition.status === "possible"
+      ? "The chosen composition remains possible."
+      : nextComposition.status === "impossible"
+        ? "The chosen composition is missed."
+        : "Whether the chosen composition can happen is unknown.";
     setPatch(nextPatch);
     setSearch(null);
     setPreviewId(null);
@@ -258,7 +264,7 @@ export default function Experience({ initialWorld, source, error }: { initialWor
     setSelected(initialWorld.visitorClosure.connectionId);
     setPlaying(false);
     seek(goal.time, true);
-    setAnnouncement(closureLocked ? "Original bridge schedule restored." : `Bridge now closes at ${displayTime(initialWorld.visitorClosure.end)}. The chosen composition is missed.`);
+    setAnnouncement(`${closureLocked ? "Original bridge schedule restored." : `Bridge now closes at ${displayTime(initialWorld.visitorClosure.end)}.`} ${compositionAnnouncement}`);
   };
 
   const viewMoment = (version: "original" | "variant") => {
