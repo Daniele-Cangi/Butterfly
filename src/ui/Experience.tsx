@@ -22,6 +22,12 @@ function canUseWebgl() {
 }
 
 type SceneVersion = "original" | "variant" | "preview";
+const requirementLabels: Record<string, string> = {
+  eventOccurred: "Prior event",
+  entityAt: "Position",
+  factEquals: "World condition",
+  route: "Available route",
+};
 
 export default function Experience({ initialWorld, source, error }: { initialWorld: World; source: string; error?: string }) {
   const displayTime = (minute: number | null) => formatTime(minute, initialWorld.originMinute);
@@ -155,6 +161,7 @@ export default function Experience({ initialWorld, source, error }: { initialWor
   const activeDifferences = useMemo(() => compare(originalResult, activeResult), [originalResult, activeResult]);
   const activeLabel = sceneVersion === "original" ? "Original" : sceneVersion === "preview" && previewWorld ? "Recovery preview" : "Your variant";
   const activeTarget = getEvent(activeResult, goal.eventId);
+  const frameStatus = activeTarget.status === "possible" ? "Possible at target" : activeTarget.status === "impossible" ? "Missed at target" : "Unresolved";
   const activeSceneTime = momentFrame ? goal.time : time;
   const effectiveTime = activeSceneTime;
   const momentPresenceSummary = [...initialWorld.featuredMoment.subjectEntityIds, ...initialWorld.featuredMoment.propEntityIds]
@@ -280,7 +287,10 @@ export default function Experience({ initialWorld, source, error }: { initialWor
     <main className="experience">
       <header className="topbar">
         <div className="brand">
-          <span className="brand-icon" aria-hidden="true">✳</span>
+          <svg className="brand-mark" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+            <path d="M23 23C13 13 5 10 5 18c0 6 6 10 17 9M25 23c10-10 18-13 18-5 0 6-6 10-17 9M22 27C12 25 8 29 11 35c3 6 8 6 12-6M26 27c10-2 14 2 11 8-3 6-8 6-12-6" />
+            <path d="M24 16v20M22 15l-4-6m8 6 4-6" />
+          </svg>
           <div><strong>BUTTERFLY</strong><small>Change the world. Keep the moment.</small></div>
         </div>
         <div className="top-actions">
@@ -295,8 +305,11 @@ export default function Experience({ initialWorld, source, error }: { initialWor
       {newVersion && <div className="error" role="status">A new world revision is available. Your variant stays anchored to this snapshot.</div>}
 
       <section className="workspace">
-        <div className="scene-shell">
-          <div className="scene-meta"><span>{initialWorld.title.toUpperCase()}</span><strong data-testid="scene-clock">{displayTime(effectiveTime)}</strong></div>
+        <div className={"scene-shell" + (momentFrame ? " frame-mode" : "")} data-version={sceneVersion} data-state={activeTarget.status}>
+          <div className="scene-meta">
+            <span>WORLD / {initialWorld.title}</span>
+            <div className="scene-time"><small>{momentFrame ? "TARGET TIME" : "WORLD TIME"}</small><strong data-testid="scene-clock">{displayTime(effectiveTime)}</strong></div>
+          </div>
           {webgl === false ? (
             <div className="fallback">
               <h2>3D view unavailable</h2>
@@ -322,7 +335,7 @@ export default function Experience({ initialWorld, source, error }: { initialWor
             />
           )}
           {sceneReady && webgl && <span className="scene-ready" data-testid="scene-ready">Neighborhood rendered</span>}
-          <div className="scene-version" aria-live="polite">{activeLabel}{momentFrame ? " · MomentFrame" : ""}</div>
+          <div className="scene-version" aria-live="polite"><i aria-hidden="true" />{activeLabel}{momentFrame ? " · MomentFrame" : ""}</div>
           <div className="scene-presence" aria-live="polite">
             {courierSample.status === "waiting" ? "Courier waiting at " + (courierPlace ?? "a scheduled stop") :
               courierSample.status === "moving" ? "Courier moving on the " + (courierSample.role ?? "road") :
@@ -337,27 +350,37 @@ export default function Experience({ initialWorld, source, error }: { initialWor
             {momentFrame && activeTarget.status === "impossible" && <span>Missed here · original composition remains viewable</span>}
           </div>
           {momentFrame && (
-            <div className="moment-frame-controls" role="group" aria-label="MomentFrame versions">
-              <div><span className="eyebrow">MOMENTFRAME</span><strong>{displayTime(goal.time)} · {activeLabel}</strong></div>
-              <div className="version-tabs">
-                <button className={sceneVersion === "original" ? "selected" : ""} onClick={() => setSceneVersion("original")}>Original</button>
-                <button className={sceneVersion === "variant" ? "selected" : ""} onClick={() => setSceneVersion("variant")}>Your variant</button>
-                {previewWorld && <button className={sceneVersion === "preview" ? "selected" : ""} onClick={() => setSceneVersion("preview")}>Recovery preview</button>}
+            <div className="moment-frame-controls" role="group" aria-label="MomentFrame versions" data-state={activeTarget.status}>
+              <div className="plate-topline"><span>OBSERVATION PLATE / 01</span><span className="plate-status" data-state={activeTarget.status}>{frameStatus}</span></div>
+              <div className="plate-heading">
+                <div><span className="eyebrow">MOMENTFRAME · {activeLabel}</span><h2>{featuredEvent.name}</h2></div>
+                <div className="plate-time"><span>TARGET</span><strong>{displayTime(goal.time)}</strong></div>
               </div>
-              <small className="moment-presence" aria-label="Moment participant presence">{momentPresenceSummary}</small>
-              <button className="frame-close" onClick={() => setMomentFrame(false)}>Return to neighborhood</button>
+              <div className="version-tabs" aria-label="Observed version">
+                <button aria-label="Original" aria-pressed={sceneVersion === "original"} className={sceneVersion === "original" ? "selected" : ""} onClick={() => setSceneVersion("original")}><span aria-hidden="true">01</span>Original</button>
+                <button aria-label="Your variant" aria-pressed={sceneVersion === "variant"} className={sceneVersion === "variant" ? "selected" : ""} onClick={() => setSceneVersion("variant")}><span aria-hidden="true">02</span>Your variant</button>
+                {previewWorld && <button aria-label="Recovery preview" aria-pressed={sceneVersion === "preview"} className={sceneVersion === "preview" ? "selected" : ""} onClick={() => setSceneVersion("preview")}><span aria-hidden="true">03</span>Recovery preview</button>}
+              </div>
+              <div className="plate-composition"><span>COMPOSITION AT {displayTime(goal.time)}</span><small className="moment-presence" aria-label="Moment participant presence">{momentPresenceSummary}</small></div>
+              <div className="plate-footer"><span title={initialWorld.baseRevision}>REV {initialWorld.baseRevision}</span><button className="frame-close" aria-label="Return to neighborhood" onClick={() => setMomentFrame(false)}>Return to neighborhood ↗</button></div>
             </div>
           )}
         </div>
 
         <aside className="side">
-          <div className="eyebrow">ONE CHANGE, MANY CONSEQUENCES</div>
-          <h1>A crossing changes an afternoon.</h1>
-          <p className="intro">Move the bridge closure earlier. Follow the delivery, then preserve this photograph without reopening the bridge.</p>
-          <button className={closureLocked ? "action secondary" : "action"} onClick={changeClosure}>
-            {closureLocked ? "Restore bridge schedule" : "Close bridge at " + displayTime(initialWorld.visitorClosure.end)}
-          </button>
-          {closureLocked && <span className="lock">✳ Bridge closure locked during recovery</span>}
+          <div className="side-intro">
+            <div className="eyebrow">FIELD NOTE / 01</div>
+            <h1>A crossing changes an afternoon.</h1>
+            <p className="intro">Move the bridge closure earlier. Follow the delivery, then preserve this photograph without reopening the bridge.</p>
+          </div>
+          <div className="condition-card" data-state={closureLocked ? "changed" : "original"}>
+            <div className="condition-title"><span>CHANGE THE CONDITION</span><strong>Bridge closing time</strong></div>
+            <div className="condition-value"><span>{displayTime(initialWorld.connections.find(connection => connection.id === initialWorld.visitorClosure.connectionId)?.windows[0].end ?? initialWorld.horizon)}</span><em>→</em><strong>{closureLocked ? displayTime(initialWorld.visitorClosure.end) : "—"}</strong></div>
+            <button className={closureLocked ? "action secondary" : "action"} onClick={changeClosure}>
+              {closureLocked ? "Restore bridge schedule" : "Close bridge at " + displayTime(initialWorld.visitorClosure.end)}
+            </button>
+            {closureLocked && <span className="lock">✳ Bridge closure locked during recovery</span>}
+          </div>
 
           <div className="event-list">
               <div className="section-label">THE DAY <span>{activeLabel.toUpperCase()}</span></div>
@@ -365,7 +388,7 @@ export default function Experience({ initialWorld, source, error }: { initialWor
                 const row = activeDifferences.find(item => item.id === event.id)!;
                 const label = playbackLabel(event, row.timing);
                 return (
-                  <button key={event.id} className={"event-row " + (selected === event.id ? "active" : "")} onClick={() => selectEvent(event.id)} aria-label={event.name + ": " + label}>
+                  <button key={event.id} className={"event-row " + (selected === event.id ? "active" : "")} data-state={event.status} onClick={() => selectEvent(event.id)} aria-label={event.name + ": " + label}>
                     <span className="event-status" data-state={event.status} aria-hidden="true">{event.status === "possible" ? "●" : event.status === "unknown" ? "?" : "×"}</span>
                     <span><strong>{event.name}</strong><small>{label}</small></span>
                     <b>{sceneVersion === "original" ? displayTime(event.time) : <>{displayTime(row.original.time)} <em>→</em> {displayTime(event.time)}</>}</b>
@@ -378,19 +401,22 @@ export default function Experience({ initialWorld, source, error }: { initialWor
           </div>
 
           <div className="inspector" aria-live="polite">
-            <div className="section-label">INSPECTOR</div>
-            <h2>{selectedEvent?.name ?? selectedConnection?.label ?? selectedConnection?.id ?? selectedEntity?.name ?? (selected === roles.storyArtifactId ? artifact.title : "Select a place or moment")}</h2>
+            <div className="section-label">CAUSES & EVIDENCE <span>{activeLabel.toUpperCase()}</span></div>
+            <div className="inspector-heading">
+              <h2>{selectedEvent?.name ?? selectedConnection?.label ?? selectedConnection?.id ?? selectedEntity?.name ?? (selected === roles.storyArtifactId ? artifact.title : "Select a place or moment")}</h2>
+              {selectedEvent && <span className="inspector-badge" data-state={selectedEvent.status}>{selectedEvent.status}</span>}
+            </div>
             {selectedEvent ? <>
               <p>{eventStatusMessage(selectedEvent)}</p>
               {selectedEvent.reasons.map((reason, index) => (
-                <div className={"reason " + (reason.status === "possible" ? "satisfied" : "")} key={index}>
-                  <strong>{reason.requirement.type} · {reason.status}</strong>
-                  <span>Observed: {reason.observed}</span>
-                  {reason.causes.length > 0 && <small>Explained by {reason.causes.map(cause => {
+                <div className="reason" data-state={reason.status} key={index}>
+                  <div className="reason-heading"><span className="reason-symbol" aria-hidden="true">{reason.status === "possible" ? "✓" : reason.status === "impossible" ? "×" : "?"}</span><strong>{requirementLabels[reason.requirement.type] ?? reason.requirement.type}</strong><em>{reason.status}</em></div>
+                  <div className="reason-observed"><span>OBSERVED</span><strong>{reason.observed}</strong></div>
+                  {reason.causes.length > 0 && <div className="reason-detail"><span>CAUSE</span><div>{reason.causes.map(cause => {
                     const event = activeResult.events.find(item => item.id === cause);
-                    return event ? <button key={cause} className="cause-link" onClick={() => selectEvent(cause)}>{event.name}</button> : cause;
-                  })}</small>}
-                  {reason.involved.length > 0 && <small>Involved: {reason.involved.map(id => activeWorld.entities.find(entity => entity.id === id)?.name ?? activeWorld.entities.find(entity => entity.id === id)?.id ?? id).join(", ")}</small>}
+                    return event ? <button key={cause} className="cause-link" aria-label={event.name} onClick={() => selectEvent(cause)}>{event.name}</button> : cause;
+                  })}</div></div>}
+                  {reason.involved.length > 0 && <div className="reason-detail"><span>INVOLVED</span><div>{reason.involved.map(id => activeWorld.entities.find(entity => entity.id === id)?.name ?? activeWorld.entities.find(entity => entity.id === id)?.id ?? id).join(", ")}</div></div>}
                 </div>
               ))}
             </> : selectedConnection ? <p>{selectedConnection.enabled ? "Available" : "Inactive"} · {selectedConnection.duration} minute crossing · current closing time {displayTime(selectedConnection.windows[0].end)}.</p>
@@ -404,9 +430,15 @@ export default function Experience({ initialWorld, source, error }: { initialWor
       <section className="bottom">
         <div className="timeline" aria-label="Scenario timeline">
           <button className="play" onClick={() => setPlaying(value => !value)} disabled={reducedMotion || momentFrame} aria-label={playing ? "Pause" : "Play"}>{playing ? "Ⅱ" : "▶"}</button>
-          <label htmlFor="time-slider">TIME <strong data-testid="timeline-clock">{displayTime(effectiveTime)}</strong></label>
-          <input id="time-slider" aria-label="Seek scenario time" type="range" min="0" max={initialWorld.horizon} step="0.05" value={effectiveTime} disabled={momentFrame} onChange={event => seek(Number(event.target.value))} />
-          <span>{displayTime(initialWorld.horizon)}</span>
+          <label className="timeline-clock" htmlFor="time-slider">{momentFrame ? "FRAME LOCKED" : "WORLD TIME"} <strong data-testid="timeline-clock">{displayTime(effectiveTime)}</strong></label>
+          <div className="timeline-track">
+            <div className="timeline-ticks" aria-hidden="true" />
+            <input id="time-slider" aria-label="Seek scenario time" type="range" min="0" max={initialWorld.horizon} step="0.05" value={effectiveTime} disabled={momentFrame} onChange={event => seek(Number(event.target.value))} />
+            <div className="timeline-markers" aria-hidden="true">
+              {eventRows.filter(event => event.time !== null).map(event => <i key={event.id} data-state={event.status} data-selected={selected === event.id} style={{ left: Math.max(0, Math.min(100, (event.time! / initialWorld.horizon) * 100)) + "%" }} />)}
+            </div>
+          </div>
+          <span className="timeline-end">{displayTime(initialWorld.horizon)}</span>
           <label className="speed-control">SPEED
             <select aria-label="Playback speed" value={speed} onChange={event => setSpeed(Number(event.target.value))}>
               <option value={1}>1×</option><option value={2}>2×</option><option value={4}>4×</option>
@@ -415,8 +447,9 @@ export default function Experience({ initialWorld, source, error }: { initialWor
           <button className="quiet" onClick={reset}>Reset variant</button>
         </div>
 
-        <div className="moment">
-          <div>
+        <div className="moment" data-state={activeTarget.status}>
+          <div className="moment-stamp"><span>TARGET</span><strong>{displayTime(goal.time)}</strong></div>
+          <div className="moment-copy">
             <span className="eyebrow">THE MOMENT TO KEEP</span>
             <h2>{activeTarget.status === "possible" ? sceneVersion === "preview" ? "Recovery preview keeps the photograph possible at " + displayTime(goal.time) + "." : effectiveTime >= goal.time ? "The photograph happened at " + displayTime(goal.time) + "." : "The photograph can happen." : activeTarget.status === "unknown" ? "The photograph remains indeterminate." : effectiveTime >= goal.time ? "The photograph is now a missed moment." : "The photograph cannot happen as planned."}</h2>
             <p>{displayTime(goal.time)} · {initialWorld.entities.find(entity => entity.id === goal.placeId)?.name} · {initialWorld.featuredMoment.subjectEntityIds.map(id => initialWorld.entities.find(entity => entity.id === id)?.name ?? id).join(", ")} · {initialWorld.entities.find(entity => entity.id === initialWorld.featuredMoment.propEntityIds[0])?.name}</p>
@@ -446,10 +479,11 @@ export default function Experience({ initialWorld, source, error }: { initialWor
                   ? "Depart at " + displayTime(operation.value)
                   : (operation.value ? "Activate " : "Deactivate ") + (initialWorld.connections.find(connection => connection.id === operation.connectionId)?.label ?? operation.connectionId));
                 return (
-                  <button key={alternative.id} className={"alternative " + (previewId === alternative.id ? "chosen" : "")} onClick={() => chooseAlternative(alternative.id)} aria-label={changes.join(" and ")}>
-                    <span>OPTION {String(index + 1).padStart(2, "0")}</span>
+                  <button key={alternative.id} className={"alternative " + (previewId === alternative.id ? "chosen" : "")} onClick={() => chooseAlternative(alternative.id)} aria-label={changes.join(" and ")} aria-pressed={previewId === alternative.id}>
+                    <span className="alternative-index">INTERVENTION / {String(index + 1).padStart(2, "0")}</span>
                     <strong>{changes.join(" + ")}</strong>
                     <small>Delivery {displayTime(previewDelivery.time)} · Setup {displayTime(previewSetup.time)} · Photograph {getEvent(alternative.result, goal.eventId).status}</small>
+                    <span className="alternative-foot"><span>{alternative.operations.length} {alternative.operations.length === 1 ? "CHANGE" : "CHANGES"}</span><span>✓ VERIFIED AT {displayTime(goal.time)}</span></span>
                   </button>
                 );
               })}
