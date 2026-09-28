@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sampleWorld } from "../fixtures/harbor";
 import { getEvent, simulate } from "../src/engine/simulate";
-import { isArrangementVisibleAt, selectMomentEntityPresence } from "../src/scene/momentPresence";
+import { getMomentMarkerPosition, isArrangementVisibleAt, selectMomentEntityPresence } from "../src/scene/momentPresence";
 import { validateWorld, type World } from "../src/world/model";
 
 const copy = (): World => structuredClone(sampleWorld);
@@ -63,6 +63,34 @@ describe("MomentFrame presence follows the active simulation", () => {
     if (presence.kind !== "uncertain") throw new Error("Expected uncertain flower presence");
     expect(presence).toMatchObject({ position: [-5, -1], lastKnownPlaceId: "depot" });
     expect(presence.position).not.toEqual(checked.featuredMoment.composition.propPositions[0].position);
+  });
+
+  it("omits an uncertain moment marker when no position was sampled", () => {
+    const world = copy();
+    const photographer = world.entities.find(entity => entity.id === world.featuredMoment.photographerEntityId)!;
+    photographer.initialPlaceId = "depot";
+    delete photographer.visual.position;
+    delete world.entities.find(entity => entity.id === "depot")!.visual.position;
+    world.facts.find(fact => fact.key === "cargoAvailable")!.interval.start = 60;
+    world.events.push({
+      id: "photographer-trip",
+      worldId: world.id,
+      kind: "transport",
+      name: "Photographer's uncertain trip",
+      at: 40,
+      requirements: [{ type: "factEquals", key: "cargoAvailable", value: true }],
+      actorIds: [photographer.id],
+      from: "depot",
+      to: "plaza",
+      mode: "van",
+      effects: [],
+    });
+    const checked = validateWorld(world);
+    const result = simulate(checked);
+    const presence = selectMomentEntityPresence(checked, result, photographer.id, 50);
+
+    expect(presence).toEqual({ kind: "uncertain", lastKnownPlaceId: "depot" });
+    expect(getMomentMarkerPosition(presence)).toBeUndefined();
   });
 
   it("shows the arrangement only after setup while its prop remains at the plaza", () => {

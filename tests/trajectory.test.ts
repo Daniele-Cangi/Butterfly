@@ -132,6 +132,41 @@ describe("timed route sampling", () => {
     expect(result.artifacts.find(artifact => artifact.id === world.presentation.roles.storyArtifactId)?.compatibility).toBe("unknown");
   });
 
+  it("lets a later verified transport establish location after an earlier unresolved trip", () => {
+    const world = structuredClone(sampleWorld);
+    world.facts.find(fact => fact.id === "cargo-ready")!.interval.start = 21;
+    world.events.push({
+      id: "later-courier-trip",
+      worldId: world.id,
+      kind: "transport",
+      name: "Later verified courier trip",
+      at: 40,
+      requirements: [],
+      actorIds: [world.presentation.roles.courierEntityId],
+      from: "depot",
+      to: "plaza",
+      mode: "van",
+      effects: [],
+    });
+    world.events.push({
+      id: "courier-arrival-check",
+      worldId: world.id,
+      kind: "fixed",
+      name: "Courier arrival check",
+      at: 50,
+      requirements: [{ type: "entityAt", entityId: world.presentation.roles.courierEntityId, placeId: "plaza" }],
+      actorIds: [],
+      effects: [],
+    });
+    const checked = validateWorld(world);
+    const result = simulate(checked);
+    const courier = checked.presentation.roles.courierEntityId;
+
+    expect(sampleEntity(checked, result, courier, 30).status).toBe("unknown");
+    expect(sampleEntity(checked, result, courier, 50)).toMatchObject({ status: "at-place", placeId: "plaza" });
+    expect(getEvent(result, "courier-arrival-check").status).toBe("possible");
+  });
+
   it("keeps semantic places known when optional visual coordinates are absent", () => {
     const world = structuredClone(sampleWorld);
     for (const entity of world.entities) delete entity.visual.position;

@@ -22,7 +22,7 @@ The runtime playhead is one shared ref. React updates the displayed clock at a t
 
 ## Phase 2 verification
 
-- `npm test`: 42 tests across 6 files exercise the retained scenario/review regressions, time-aware route sampling and arrival positions, fractional display, MomentFrame presence, recovery search, Sanity authoring conditionals and publication concurrency.
+- `npm test`: 44 tests across 6 files exercise the retained scenario/review regressions, time-aware route sampling and arrival positions, fractional display, MomentFrame presence, recovery search, Sanity authoring conditionals and publication concurrency.
 - `npm run test:browser`: 4 Playwright Chromium flows check original composition, bridge closure, missed moment and article claim, all MomentFrame versions, ferry wait, recovery preview and Apply, early departure, reset, fractional seek/playback, target-time lock, mobile reduced motion and Studio configuration.
 - Browser screenshots are stored under `screenshots/` and opened for visual review. These tests use the local fixture; Sanity live configuration is not asserted as successful.
 
@@ -35,6 +35,7 @@ The runtime playhead is one shared ref. React updates the displayed clock at a t
 - The PR review's three schema/simulation findings are covered: conditional Studio fields are visible for matching event/requirement/intervention kinds, place entities omit `initialPlaceId`, and known semantic places remain feasible without optional display coordinates. The location test includes a completed route with no place/entity rendering coordinates.
 - The follow-up review findings are covered: the initial pointer can have an empty `activeRevisionId` before the first publication, and the Sanity adapter discards stale hidden event fields according to the event kind while direct engine validation rejects irrelevant dependency fields. Regression tests verify that a stale hidden dependency on a fixed event does not create a false cycle and that the actual photograph remains possible.
 - The route-sampling review finding is covered: after a successful transport to a place without authored display coordinates, the actor retains the endpoint sampled from its completed route rather than snapping back to its previous position.
+- The latest review findings are covered: an unresolved earlier trip remains uncertain until a later successful movement establishes a new location, and an uncertain MomentFrame person is omitted if the engine has no position to show.
 
 Do not log or commit `.env.local` or a service token. Do not expose a write route to anonymous clients. Keep StoryArtifact text as plain untrusted text. If extending to Markdown, sanitize it before rendering. Any future App SDK or Workflow use must follow current Sanity docs and retain the pure engine as the authority for outcomes.
 

@@ -6,6 +6,10 @@ export type MomentPresence =
   | { kind: "absent"; placeId?: string }
   | { kind: "uncertain"; position?: [number, number]; lastKnownPlaceId?: string };
 
+export function getMomentMarkerPosition(presence: MomentPresence): [number, number] | undefined {
+  return presence.kind === "absent" ? undefined : presence.position;
+}
+
 /** Composition coordinates are staging positions, never evidence of presence. */
 export function selectMomentEntityPresence(world: World, result: Simulation, entityId: string, minute: number): MomentPresence {
   const sample = sampleEntity(world, result, entityId, minute);

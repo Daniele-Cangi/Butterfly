@@ -210,18 +210,23 @@ function resolveEntityPosition(world: World, results: ReadonlyMap<string, EventR
   let placeId = entity.initialPlaceId;
   let position = entity.visual.position ?? (placeId ? world.entities.find(candidate => candidate.id === placeId)?.visual.position : undefined);
   let lastMovement: string | undefined;
+  const unresolvedTransports: string[] = [];
   for (const event of transports) {
     if (event.at! > minute) break;
     if (excludedEvents.has(event.id)) continue;
     const result = results.get(event.id);
-    if (!result) return { sample: { status: "unknown", ...(position ? { position } : {}), ...(placeId ? { placeId } : {}) }, causes: [event.id] };
-    if (result.status === "unknown") return { sample: { status: "unknown", ...(position ? { position } : {}), ...(placeId ? { placeId } : {}) }, causes: [event.id] };
+    if (!result || result.status === "unknown") {
+      unresolvedTransports.push(event.id);
+      continue;
+    }
     if (result.status !== "possible" || !result.route) continue;
     if (minute < result.route.arrive) return { sample: sampleRoute(result.route, minute), causes: [event.id] };
     placeId = event.to;
     position = world.entities.find(candidate => candidate.id === placeId)?.visual.position ?? result.route.toPosition ?? position;
     lastMovement = event.id;
+    unresolvedTransports.length = 0;
   }
+  if (unresolvedTransports.length) return { sample: { status: "unknown", ...(position ? { position } : {}), ...(placeId ? { placeId } : {}) }, causes: unresolvedTransports };
   return placeId
     ? { sample: { status: "at-place", ...(position ? { position } : {}), placeId }, causes: lastMovement ? [lastMovement] : [] }
     : { sample: { status: "unknown", ...(position ? { position } : {}), ...(placeId ? { placeId } : {}) }, causes: [] };

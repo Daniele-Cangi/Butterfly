@@ -4,7 +4,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { sampleEntity, type PositionSample, type Simulation } from "../engine/simulate";
-import { isArrangementVisibleAt, selectMomentEntityPresence } from "./momentPresence";
+import { getMomentMarkerPosition, isArrangementVisibleAt, selectMomentEntityPresence } from "./momentPresence";
 import type { World } from "../world/model";
 
 type Point = [number, number];
@@ -383,7 +383,8 @@ function WorldScene(props: DioramaProps) {
           if (momentFrame && world.featuredMoment.subjectEntityIds.includes(entity.id)) {
             const presence = selectMomentEntityPresence(world, result, entity.id, activeTime);
             if (presence.kind === "absent") return null;
-            const position = presence.position ?? entity.visual.position ?? [0, 0] as Point;
+            const position = getMomentMarkerPosition(presence);
+            if (!position) return null;
             return <StaticPerson key={entity.id} entity={entity} position={position} selected={selected === entity.id} uncertain={presence.kind === "uncertain"} onSelect={() => onSelect(entity.id)} />;
           }
           return <TravelingEntity key={entity.id} world={world} result={result} entityId={entity.id} timeRef={timeRef} kind="person" selected={selected === entity.id} visibleInMoment={!momentFrame} onSelect={() => onSelect(entity.id)} />;
