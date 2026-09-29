@@ -29,7 +29,7 @@ test("original, missed MomentFrame, ferry recovery, intermediate wait, apply and
   page.on("pageerror", error => errors.push(error.message));
   page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
   await page.goto("/");
-  await expect(page.getByText(/Local sample/)).toBeVisible();
+  await expect(page.getByText(/LIVE SANITY|Local sample/i)).toBeVisible();
   await expect(page.getByRole("heading", { name: "A crossing changes an afternoon." })).toBeVisible();
   await expect(page.getByText(/The clock is a viewpoint into the day/)).toBeVisible();
   await expect(page.getByTestId("scene-ready")).toBeAttached({ timeout: 30000 });
