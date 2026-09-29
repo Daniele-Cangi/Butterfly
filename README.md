@@ -29,7 +29,7 @@ The boundary rule is explicit: a requirement completed exactly when an event sta
 
 ## Screenshots
 
-These are full-page browser captures of the working experience, using the published Butterfly revision from the local Sanity reader. The Vercel production deployment is connected; its server still needs a Viewer token for live Sanity reads (see [Live content](#live-content-and-sanity)).
+These are full-page browser captures of the working experience. The public Vercel production deployment reads the published Butterfly revision from Sanity on the server; the screenshots below capture the same verified journey exercised by the browser suite.
 
 ### The neighborhood at the chosen time
 
@@ -107,7 +107,7 @@ The project ID and dataset name are public configuration. `SANITY_API_READ_TOKEN
 
 The public experience reads a complete frozen revision from Sanity on the server. Visitors do not need accounts or API keys. If a live read fails, the app explicitly labels the local fallback **Local sample (live unavailable)** and exposes the connection error; it does not pretend the sample came from Sanity.
 
-The repository is linked to Vercel and the Production build is deployed. At the latest README verification, Vercel's `/api/version` returned `503 Live version unavailable`; configure `SANITY_API_READ_TOKEN` for the Vercel Production environment and redeploy to make the active Sanity revision available there. The deployment URL checked during verification also required Vercel sign-in, so this README does not present it as a public demo link.
+The repository is linked to Vercel and the Production build is live at [butterfly-mu-orpin.vercel.app](https://butterfly-mu-orpin.vercel.app). The production server reads **Live Sanity** and `/api/version` returns the active frozen revision `butterfly.revision.edf8db8b-8083-4741-8095-543201be4f82`. The public experience is accessible without a Vercel login.
 
 ### Authoring and publication
 
